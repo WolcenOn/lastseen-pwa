@@ -13,12 +13,16 @@ const sendBufferSize = 16
 type ClientConfig struct {
 	ID       string
 	Nickname string
+	PIN      string
+	Avatar   string
 	Conn     *websocket.Conn
 }
 
 type Client struct {
 	ID       string
 	Nickname string
+	PIN      string
+	Avatar   string
 
 	Conn *websocket.Conn
 	send chan OutboundMessage
@@ -38,6 +42,8 @@ func NewClient(config ClientConfig) *Client {
 	return &Client{
 		ID:        config.ID,
 		Nickname:  config.Nickname,
+		PIN:       config.PIN,
+		Avatar:    config.Avatar,
 		Conn:      config.Conn,
 		send:      make(chan OutboundMessage, sendBufferSize),
 		Connected: true,
@@ -145,5 +151,6 @@ func (c *Client) Clone() *Client {
 	copy := *c
 	copy.Conn = nil
 	copy.send = nil
+	copy.PIN = ""
 	return &copy
 }
