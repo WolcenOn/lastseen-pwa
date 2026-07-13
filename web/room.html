@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>Sala | LastSeen</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/assets/icons/icon.svg" />
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body>
+    <main class="room-shell">
+      <section class="card" id="join-card">
+        <h1>Entrar</h1>
+        <p>Usa un mote temporal. No pedimos email ni teléfono.</p>
+        <input id="nickname" autocomplete="nickname" maxlength="24" placeholder="Tu mote" />
+        <button id="join-room" type="button">Compartir ubicación</button>
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card" id="room-card" hidden>
+        <h2>Grupo</h2>
+        <p id="room-status" class="status" aria-live="polite"></p>
+        <div id="members" class="member-list"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
