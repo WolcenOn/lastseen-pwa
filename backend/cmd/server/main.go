@@ -4,15 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/WolcenOn/lastseen-pwa/backend/internal/realtime"
 	"github.com/gorilla/websocket"
@@ -25,6 +28,13 @@ const (
 	defaultMaxFree    = 3
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
+)
+
+var (
+	pinPattern = regexp.MustCompile(`^\d{4,8}$`)
+	avatarSet  = []string{"🦊", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🦉", "🐝", "🦄", "🐙", "🐢", "🐳", "⭐", "⚡"}
+	adjectives = []string{"Luna", "Brava", "Azul", "Fugaz", "Clara", "Norte", "Libre", "Chispa", "Aurora", "Rayo", "Menta", "Nube"}
+	nouns      = []string{"Cuadrilla", "Cometa", "Farol", "Brújula", "Verbena", "Peña", "Ronda", "Refugio", "Mapa", "Equipo", "Punto", "Nido"}
 )
 
 var upgrader = websocket.Upgrader{
@@ -41,6 +51,10 @@ var upgrader = websocket.Upgrader{
 			strings.HasPrefix(origin, "https://localhost") ||
 			strings.HasPrefix(origin, "http://127.0.0.1")
 	},
+}
+
+type createRoomRequest struct {
+	Name string `json:"name"`
 }
 
 func main() {
@@ -62,6 +76,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/rooms", createRoomHandler(hub))
+	mux.HandleFunc("GET /api/rooms/{roomID}", roomInfoHandler(hub))
 	mux.HandleFunc("GET /ws/rooms/{roomID}", websocketHandler(hub))
 
 	staticPath, err := filepath.Abs(staticDir)
@@ -97,24 +112,56 @@ func main() {
 
 func createRoomHandler(hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var payload createRoomRequest
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+		}
+
 		roomID, err := randomURLSafe(9)
 		if err != nil {
 			http.Error(w, "failed to create room", http.StatusInternalServerError)
 			return
 		}
 
-		room := hub.CreateRoom(roomID)
+		roomName := sanitizeRoomName(payload.Name)
+		if roomName == "" {
+			roomName = randomRoomName()
+		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"roomId":"` + room.ID + `","url":"/room/` + room.ID + `"}`))
+		room := hub.CreateRoom(roomID, roomName)
+
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"roomId": room.ID,
+			"name":   room.Name,
+			"url":    "/room/" + room.ID,
+		})
+	}
+}
+
+func roomInfoHandler(hub *realtime.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		roomID := r.PathValue("roomID")
+		if roomID == "" {
+			http.Error(w, "missing room id", http.StatusBadRequest)
+			return
+		}
+
+		room, ok := hub.RoomInfo(roomID)
+		if !ok {
+			http.Error(w, "room not found", http.StatusNotFound)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, room)
 	}
 }
 
 func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		roomID := r.PathValue("roomID")
-		nickname := strings.TrimSpace(r.URL.Query().Get("nick"))
+		nickname := sanitizeNickname(r.URL.Query().Get("nick"))
+		pin := strings.TrimSpace(r.URL.Query().Get("pin"))
+		avatar := sanitizeAvatar(r.URL.Query().Get("avatar"))
 
 		if roomID == "" {
 			http.Error(w, "missing room id", http.StatusBadRequest)
@@ -124,9 +171,12 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 			http.Error(w, "missing nickname", http.StatusBadRequest)
 			return
 		}
-		if len(nickname) > 24 {
-			http.Error(w, "nickname too long", http.StatusBadRequest)
+		if !pinPattern.MatchString(pin) {
+			http.Error(w, "invalid pin", http.StatusBadRequest)
 			return
+		}
+		if avatar == "" {
+			avatar = avatarSet[0]
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -141,7 +191,13 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 			return
 		}
 
-		client := realtime.NewClient(realtime.ClientConfig{ID: clientID, Nickname: nickname, Conn: conn})
+		client := realtime.NewClient(realtime.ClientConfig{
+			ID:       clientID,
+			Nickname: nickname,
+			PIN:      pin,
+			Avatar:   avatar,
+			Conn:     conn,
+		})
 		if err := hub.JoinRoom(roomID, client); err != nil {
 			_ = conn.WriteJSON(realtime.OutboundMessage{Type: "error", Data: map[string]string{"message": err.Error()}})
 			_ = conn.Close()
@@ -161,12 +217,63 @@ func env(key, fallback string) string {
 	return value
 }
 
+func randomRoomName() string {
+	left := adjectives[randomIndex(len(adjectives))]
+	right := nouns[randomIndex(len(nouns))]
+	return left + " " + right
+}
+
+func randomIndex(max int) int {
+	if max <= 1 {
+		return 0
+	}
+
+	buf := make([]byte, 1)
+	if _, err := rand.Read(buf); err != nil {
+		return 0
+	}
+
+	return int(buf[0]) % max
+}
+
+func sanitizeRoomName(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if utf8.RuneCountInString(value) > 36 {
+		return string([]rune(value)[:36])
+	}
+	return value
+}
+
+func sanitizeNickname(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if utf8.RuneCountInString(value) > 24 {
+		return string([]rune(value)[:24])
+	}
+	return value
+}
+
+func sanitizeAvatar(value string) string {
+	value = strings.TrimSpace(value)
+	for _, allowed := range avatarSet {
+		if value == allowed {
+			return value
+		}
+	}
+	return ""
+}
+
 func randomURLSafe(size int) (string, error) {
 	buf := make([]byte, size)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func securityHeaders(next http.Handler) http.Handler {
