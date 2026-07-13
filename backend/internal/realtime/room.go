@@ -7,6 +7,7 @@ import (
 
 type RoomConfig struct {
 	ID             string
+	Name           string
 	TTL            time.Duration
 	MaxFreeClients int
 }
@@ -15,6 +16,7 @@ type Room struct {
 	mu sync.RWMutex
 
 	ID             string
+	Name           string
 	TTL            time.Duration
 	MaxFreeClients int
 
@@ -29,11 +31,30 @@ func NewRoom(config RoomConfig) *Room {
 
 	return &Room{
 		ID:             config.ID,
+		Name:           config.Name,
 		TTL:            config.TTL,
 		MaxFreeClients: config.MaxFreeClients,
 		CreatedAt:      now,
 		LastActivityAt: now,
 		clients:        make(map[string]*Client),
+	}
+}
+
+func (r *Room) Public(now time.Time) PublicRoom {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	remaining := r.TTL - now.Sub(r.LastActivityAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return PublicRoom{
+		ID:        r.ID,
+		Name:      r.Name,
+		CreatedAt: r.CreatedAt,
+		ExpiresIn: int64(remaining.Seconds()),
+		MaxFree:   r.MaxFreeClients,
 	}
 }
 
@@ -76,6 +97,23 @@ func (r *Room) MarkDisconnected(clientID string) (*Client, bool) {
 	r.touchLocked()
 
 	return client.Clone(), true
+}
+
+func (r *Room) ForceSelfDisconnect(clientID string, pin string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	client, ok := r.clients[clientID]
+	if !ok || client.PIN == "" || client.PIN != pin {
+		return false
+	}
+
+	client.Connected = false
+	client.LastSeen = time.Now().UTC()
+	client.CloseSend()
+	r.touchLocked()
+
+	return true
 }
 
 func (r *Room) UpdateLocation(clientID string, msg InboundMessage) {
@@ -127,16 +165,30 @@ func (r *Room) SendSnapshot(client *Client) {
 	client.Send(OutboundMessage{Type: "snapshot", Data: r.Snapshot()})
 }
 
-func (r *Room) Snapshot() []PublicClient {
+func (r *Room) Snapshot() RoomSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]PublicClient, 0, len(r.clients))
+	clients := make([]PublicClient, 0, len(r.clients))
 	for _, client := range r.clients {
-		result = append(result, client.toPublicLocked())
+		clients = append(clients, client.toPublicLocked())
 	}
 
-	return result
+	remaining := r.TTL - time.Since(r.LastActivityAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	return RoomSnapshot{
+		Room: PublicRoom{
+			ID:        r.ID,
+			Name:      r.Name,
+			CreatedAt: r.CreatedAt,
+			ExpiresIn: int64(remaining.Seconds()),
+			MaxFree:   r.MaxFreeClients,
+		},
+		Clients: clients,
+	}
 }
 
 func (r *Room) Broadcast(msg OutboundMessage) {
@@ -198,6 +250,7 @@ func (c *Client) toPublicLocked() PublicClient {
 	return PublicClient{
 		ID:            c.ID,
 		Nickname:      c.Nickname,
+		Avatar:        c.Avatar,
 		Lat:           c.Lat,
 		Lng:           c.Lng,
 		BatteryLevel:  c.BatteryLevel,
