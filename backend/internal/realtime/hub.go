@@ -58,12 +58,13 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-func (h *Hub) CreateRoom(id string) *Room {
+func (h *Hub) CreateRoom(id string, name string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	room := NewRoom(RoomConfig{
 		ID:             id,
+		Name:           name,
 		TTL:            h.config.RoomTTL,
 		MaxFreeClients: h.config.MaxFreeClients,
 	})
@@ -78,6 +79,15 @@ func (h *Hub) GetRoom(id string) (*Room, bool) {
 
 	room, ok := h.rooms[id]
 	return room, ok
+}
+
+func (h *Hub) RoomInfo(id string) (PublicRoom, bool) {
+	room, ok := h.GetRoom(id)
+	if !ok {
+		return PublicRoom{}, false
+	}
+
+	return room.Public(time.Now().UTC()), true
 }
 
 func (h *Hub) JoinRoom(roomID string, client *Client) error {
@@ -96,6 +106,7 @@ func (h *Hub) JoinRoom(roomID string, client *Client) error {
 		Data: PublicClient{
 			ID:        client.ID,
 			Nickname:  client.Nickname,
+			Avatar:    client.Avatar,
 			Connected: true,
 			LastSeen:  time.Now().UTC(),
 		},
@@ -120,6 +131,7 @@ func (h *Hub) LeaveRoom(roomID string, clientID string) {
 		Data: PublicClient{
 			ID:           client.ID,
 			Nickname:     client.Nickname,
+			Avatar:       client.Avatar,
 			Lat:          client.Lat,
 			Lng:          client.Lng,
 			BatteryLevel: client.BatteryLevel,
@@ -144,6 +156,10 @@ func (h *Hub) HandleClientMessage(roomID string, clientID string, msg InboundMes
 		room.SendToClient(msg.TargetID, OutboundMessage{Type: "wake", Data: map[string]string{"from": clientID}})
 	case "sos":
 		room.MarkSOS(clientID, msg)
+	case "disconnect":
+		if room.ForceSelfDisconnect(clientID, msg.PIN) {
+			room.Broadcast(OutboundMessage{Type: "leave", Data: map[string]string{"id": clientID}})
+		}
 	}
 }
 
