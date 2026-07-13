@@ -11,6 +11,7 @@ type InboundMessage struct {
 
 	BatteryLevel float64 `json:"bat,omitempty"`
 	TargetID     string  `json:"target,omitempty"`
+	PIN          string  `json:"pin,omitempty"`
 }
 
 func (m InboundMessage) Valid() bool {
@@ -23,6 +24,8 @@ func (m InboundMessage) Valid() bool {
 		return m.TargetID != ""
 	case "sos":
 		return validLatLng(m.Lat, m.Lng)
+	case "disconnect":
+		return m.PIN != ""
 	default:
 		return false
 	}
@@ -33,9 +36,23 @@ type OutboundMessage struct {
 	Data any    `json:"d,omitempty"`
 }
 
+type PublicRoom struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresIn int64     `json:"expiresIn"`
+	MaxFree   int       `json:"maxFree"`
+}
+
+type RoomSnapshot struct {
+	Room    PublicRoom     `json:"room"`
+	Clients []PublicClient `json:"clients"`
+}
+
 type PublicClient struct {
 	ID       string `json:"id"`
 	Nickname string `json:"nick"`
+	Avatar   string `json:"avatar"`
 
 	Lat float64 `json:"lat,omitempty"`
 	Lng float64 `json:"lng,omitempty"`
