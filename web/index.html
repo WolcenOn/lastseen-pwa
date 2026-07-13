@@ -12,8 +12,17 @@
   <body>
     <main class="hero">
       <section class="card">
+        <p class="eyebrow">PWA efímera · sin registro · sin base de datos</p>
         <h1>LastSeen</h1>
-        <p>Salas efímeras para compartir ubicación en grupo sin registro, sin descarga y sin base de datos.</p>
+        <p>Salas temporales para compartir ubicación en grupo durante eventos, fiestas o salidas nocturnas.</p>
+
+        <label for="room-name">Nombre de la sala</label>
+        <div class="inline-field">
+          <input id="room-name" maxlength="36" placeholder="Ej. Cuadrilla San Fermín" />
+          <button id="random-room-name" class="icon-button" type="button" aria-label="Generar nombre aleatorio">🎲</button>
+        </div>
+        <small>Déjalo vacío y LastSeen generará un nombre corto y memorable.</small>
+
         <button id="create-room" type="button">Crear sala segura</button>
         <p id="status" class="status" aria-live="polite"></p>
       </section>
