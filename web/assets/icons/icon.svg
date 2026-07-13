@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LastSeen icon">
+  <rect width="512" height="512" rx="112" fill="#0b1220"/>
+  <circle cx="256" cy="220" r="112" fill="#38bdf8" opacity="0.18"/>
+  <path fill="#38bdf8" d="M256 72c-81 0-147 66-147 147 0 110 147 221 147 221s147-111 147-221c0-81-66-147-147-147Zm0 202a55 55 0 1 1 0-110 55 55 0 0 1 0 110Z"/>
+  <circle cx="256" cy="219" r="31" fill="#f8fafc"/>
+</svg>
