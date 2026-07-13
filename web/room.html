@@ -11,17 +11,44 @@
   </head>
   <body>
     <main class="room-shell">
+      <section class="card room-header">
+        <p class="eyebrow">Sala efímera</p>
+        <h1 id="room-title">LastSeen</h1>
+        <p id="room-link" class="mono"></p>
+        <div class="button-grid">
+          <button id="copy-link" type="button" class="secondary">Copiar enlace</button>
+          <button id="share-link" type="button" class="secondary">Compartir</button>
+        </div>
+      </section>
+
       <section class="card" id="join-card">
-        <h1>Entrar</h1>
-        <p>Usa un mote temporal. No pedimos email ni teléfono.</p>
+        <h2>Tu identidad temporal</h2>
+        <p>Elige un mote, un avatar y un PIN privado para poder cerrar tu conexión de forma forzada.</p>
+
+        <label for="nickname">Mote</label>
         <input id="nickname" autocomplete="nickname" maxlength="24" placeholder="Tu mote" />
+
+        <label for="pin">PIN privado</label>
+        <div class="inline-field">
+          <input id="pin" inputmode="numeric" maxlength="8" placeholder="4-8 números" />
+          <button id="random-pin" class="icon-button" type="button" aria-label="Generar PIN">🔐</button>
+        </div>
+
+        <label>Avatar</label>
+        <div id="avatar-picker" class="avatar-picker" role="radiogroup" aria-label="Elegir avatar"></div>
+
         <button id="join-room" type="button">Compartir ubicación</button>
         <p id="status" class="status" aria-live="polite"></p>
       </section>
 
       <section class="card" id="room-card" hidden>
-        <h2>Grupo</h2>
-        <p id="room-status" class="status" aria-live="polite"></p>
+        <div class="room-actions">
+          <div>
+            <h2>Grupo</h2>
+            <p id="room-status" class="status" aria-live="polite"></p>
+          </div>
+          <button id="leave-room" type="button" class="danger">Salir</button>
+        </div>
         <div id="members" class="member-list"></div>
       </section>
     </main>
