@@ -16,7 +16,7 @@ body {
 }
 
 main {
-  width: min(100%, 680px);
+  width: min(100%, 720px);
   margin: 0 auto;
   padding: 24px;
 }
@@ -37,15 +37,36 @@ main {
   backdrop-filter: blur(18px);
 }
 
+h1,
+h2 {
+  margin: 0 0 12px;
+  letter-spacing: -0.05em;
+}
+
 h1 {
-  margin: 0;
   font-size: clamp(2.2rem, 9vw, 4.5rem);
-  letter-spacing: -0.08em;
+}
+
+h2 {
+  font-size: 1.4rem;
 }
 
 p {
   color: #cbd5e1;
   line-height: 1.55;
+}
+
+small {
+  display: block;
+  margin: -4px 0 16px;
+  color: #94a3b8;
+}
+
+label {
+  display: block;
+  margin: 16px 0 8px;
+  color: #dbeafe;
+  font-weight: 700;
 }
 
 button,
@@ -71,15 +92,64 @@ button {
   font-weight: 800;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 button.secondary {
   background: transparent;
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
+button.danger {
+  background: #fb7185;
+  color: #450a0a;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #7dd3fc;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .status {
   min-height: 24px;
   color: #93c5fd;
+}
+
+.mono {
+  overflow-wrap: anywhere;
+  color: #bae6fd;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+}
+
+.inline-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.inline-field input {
+  margin-bottom: 12px;
+}
+
+.icon-button {
+  width: 56px;
+  min-width: 56px;
+  padding: 16px 0;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .room-shell {
@@ -88,19 +158,72 @@ button.secondary {
   padding-top: 24px;
 }
 
+.room-header h1 {
+  font-size: clamp(2rem, 8vw, 3.5rem);
+}
+
+.room-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.room-actions .danger {
+  width: auto;
+  min-width: 96px;
+}
+
+.avatar-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.avatar-choice {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  font-size: 1.6rem;
+}
+
+.avatar-choice.selected {
+  outline: 3px solid #38bdf8;
+  background: rgba(56, 189, 248, 0.18);
+}
+
 .member-list {
   display: grid;
   gap: 8px;
 }
 
 .member {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
   gap: 12px;
   padding: 12px;
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.74);
   border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  font-size: 1.5rem;
+}
+
+.member-main {
+  min-width: 0;
 }
 
 .badge {
@@ -114,4 +237,27 @@ button.secondary {
 
 .badge.offline {
   background: #f97316;
+}
+
+@media (max-width: 520px) {
+  main {
+    padding: 16px;
+  }
+
+  .card {
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .button-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .room-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .room-actions .danger {
+    width: 100%;
+  }
 }
