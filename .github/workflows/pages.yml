@@ -1,0 +1,61 @@
+name: Deploy PWA to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: "Public Railway backend URL, for example https://lastseen-production.up.railway.app"
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure API base URL
+        shell: bash
+        run: |
+          API_BASE_URL="${{ github.event.inputs.api_base_url }}"
+          if [ -z "$API_BASE_URL" ]; then
+            API_BASE_URL="${{ vars.LASTSEEN_API_BASE_URL }}"
+          fi
+          if [ -z "$API_BASE_URL" ]; then
+            echo "LASTSEEN_API_BASE_URL is required. Set it as a repository variable or run this workflow manually with api_base_url." >&2
+            exit 1
+          fi
+          cat > web/config.js <<EOF
+          window.LASTSEEN_API_BASE_URL = "$API_BASE_URL";
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
