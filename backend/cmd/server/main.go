@@ -42,14 +42,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-
-		// MVP local allowlist. Harden with ALLOWED_ORIGINS before public deployment.
-		return strings.HasPrefix(origin, "http://localhost") ||
-			strings.HasPrefix(origin, "https://localhost") ||
-			strings.HasPrefix(origin, "http://127.0.0.1")
+		return origin == "" || isAllowedOrigin(origin)
 	},
 }
 
@@ -58,7 +51,7 @@ type createRoomRequest struct {
 }
 
 func main() {
-	addr := env("ADDR", defaultAddr)
+	addr := resolveAddr()
 	staticDir := env("STATIC_DIR", defaultStaticDir)
 
 	hub := realtime.NewHub(realtime.HubConfig{
@@ -75,6 +68,7 @@ func main() {
 	go hub.Run(ctx)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", healthHandler)
 	mux.HandleFunc("POST /api/rooms", createRoomHandler(hub))
 	mux.HandleFunc("GET /api/rooms/{roomID}", roomInfoHandler(hub))
 	mux.HandleFunc("GET /ws/rooms/{roomID}", websocketHandler(hub))
@@ -87,7 +81,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           securityHeaders(mux),
+		Handler:           securityHeaders(corsMiddleware(mux)),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
@@ -108,6 +102,10 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func createRoomHandler(hub *realtime.Hub) http.HandlerFunc {
@@ -209,6 +207,14 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 	}
 }
 
+func resolveAddr() string {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port != "" {
+		return ":" + port
+	}
+	return env("ADDR", defaultAddr)
+}
+
 func env(key, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -274,6 +280,47 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Add("Vary", "Origin")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAllowedOrigin(origin string) bool {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return false
+	}
+
+	if strings.HasPrefix(origin, "http://localhost") ||
+		strings.HasPrefix(origin, "https://localhost") ||
+		strings.HasPrefix(origin, "http://127.0.0.1") {
+		return true
+	}
+
+	for _, allowed := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
+		allowed = strings.TrimRight(strings.TrimSpace(allowed), "/")
+		if allowed != "" && origin == allowed {
+			return true
+		}
+	}
+
+	return false
 }
 
 func securityHeaders(next http.Handler) http.Handler {
