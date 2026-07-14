@@ -11,48 +11,43 @@
   </head>
   <body>
     <main class="room-shell">
-      <section class="card room-header">
-        <p class="eyebrow">Sala efímera</p>
-        <h1 id="room-title">LastSeen</h1>
-        <p id="room-link" class="mono"></p>
-        <div class="button-grid">
-          <button id="copy-link" type="button" class="secondary">Copiar enlace</button>
-          <button id="share-link" type="button" class="secondary">Compartir</button>
-        </div>
-      </section>
-
       <section class="card" id="join-card">
-        <h2>Tu identidad temporal</h2>
-        <p>Elige un mote, un avatar y un PIN privado para poder cerrar tu conexión de forma forzada.</p>
+        <p id="room-name" class="eyebrow">Sala efímera</p>
+        <h1>Entrar</h1>
+        <p>Usa un mote temporal. No pedimos email ni teléfono.</p>
 
         <label for="nickname">Mote</label>
         <input id="nickname" autocomplete="nickname" maxlength="24" placeholder="Tu mote" />
 
-        <label for="pin">PIN privado</label>
-        <div class="inline-field">
-          <input id="pin" inputmode="numeric" maxlength="8" placeholder="4-8 números" />
-          <button id="random-pin" class="icon-button" type="button" aria-label="Generar PIN">🔐</button>
+        <label for="pin">PIN privado para salir</label>
+        <div class="inline-control">
+          <input id="pin" inputmode="numeric" maxlength="6" placeholder="PIN" />
+          <button id="random-pin" class="secondary compact" type="button">🎲</button>
         </div>
 
-        <label>Avatar</label>
-        <div id="avatar-picker" class="avatar-picker" role="radiogroup" aria-label="Elegir avatar"></div>
+        <label for="avatar">Avatar</label>
+        <div id="avatar-picker" class="avatar-picker" role="listbox" aria-label="Elige avatar"></div>
+        <input id="avatar" type="hidden" />
 
         <button id="join-room" type="button">Compartir ubicación</button>
         <p id="status" class="status" aria-live="polite"></p>
       </section>
 
       <section class="card" id="room-card" hidden>
-        <div class="room-actions">
-          <div>
-            <h2>Grupo</h2>
-            <p id="room-status" class="status" aria-live="polite"></p>
-          </div>
-          <button id="leave-room" type="button" class="danger">Salir</button>
+        <p id="room-title" class="eyebrow">Sala</p>
+        <h2>Grupo</h2>
+        <div class="share-box">
+          <input id="share-link" readonly />
+          <button id="copy-link" class="secondary" type="button">Copiar enlace</button>
+          <button id="native-share" class="secondary" type="button">Compartir</button>
         </div>
+        <p id="room-status" class="status" aria-live="polite"></p>
         <div id="members" class="member-list"></div>
+        <button id="leave-room" class="danger" type="button">Salir</button>
       </section>
     </main>
 
+    <script src="/config.js"></script>
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>
