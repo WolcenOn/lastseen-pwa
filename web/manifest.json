@@ -2,8 +2,8 @@
   "name": "LastSeen PWA",
   "short_name": "LastSeen",
   "description": "PWA efímera para compartir ubicación en grupo sin registros ni descargas.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0b1220",
@@ -13,7 +13,7 @@
   "categories": ["navigation", "utilities", "safety"],
   "icons": [
     {
-      "src": "/assets/icons/icon.svg",
+      "src": "./assets/icons/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
