@@ -1,7 +1,7 @@
 const statusEl = document.querySelector("#status");
 const createRoomButton = document.querySelector("#create-room");
 const randomRoomNameButton = document.querySelector("#random-room-name");
-const roomNameInput = document.querySelector("#room-name");
+const roomNameInput = document.querySelector("#room-name-input");
 const joinRoomButton = document.querySelector("#join-room");
 const nicknameInput = document.querySelector("#nickname");
 const pinInput = document.querySelector("#pin");
@@ -11,6 +11,7 @@ const copyLinkButton = document.querySelector("#copy-link");
 const shareLinkButton = document.querySelector("#share-link");
 const leaveRoomButton = document.querySelector("#leave-room");
 const roomTitle = document.querySelector("#room-title");
+const roomNameLabel = document.querySelector("#room-name");
 const roomLink = document.querySelector("#room-link");
 const joinCard = document.querySelector("#join-card");
 const roomCard = document.querySelector("#room-card");
@@ -79,7 +80,8 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
 
   try {
-    await navigator.serviceWorker.register("/sw.js");
+    const swURL = new URL("./sw.js", document.baseURI);
+    await navigator.serviceWorker.register(swURL);
   } catch (error) {
     console.warn("Service Worker registration failed", error);
   }
@@ -90,7 +92,7 @@ async function createRoom() {
   createRoomButton.disabled = true;
 
   try {
-    const response = await fetch("/api/rooms", {
+    const response = await fetch(apiURL("/api/rooms"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: roomNameInput?.value?.trim() || "" })
@@ -98,7 +100,10 @@ async function createRoom() {
     if (!response.ok) throw new Error("No se pudo crear la sala");
 
     const data = await response.json();
-    window.location.href = data.url;
+    const roomID = data.roomId || extractRoomID(data.url);
+    if (!roomID) throw new Error("La respuesta del servidor no contiene sala válida");
+
+    window.location.href = buildRoomPageURL(roomID);
   } catch (error) {
     createRoomButton.disabled = false;
     setStatus(error.message || "Error creando sala");
@@ -107,15 +112,17 @@ async function createRoom() {
 
 async function hydrateRoomHeader(roomID) {
   const absoluteURL = getAbsoluteRoomURL();
-  if (roomLink) roomLink.textContent = absoluteURL;
+  if (roomLink) roomLink.value = absoluteURL;
 
   try {
-    const response = await fetch(`/api/rooms/${encodeURIComponent(roomID)}`);
+    const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(roomID)}`));
     if (!response.ok) throw new Error("Sala no encontrada");
 
     const room = await response.json();
-    if (roomTitle) roomTitle.textContent = room.name || "Sala LastSeen";
-    document.title = `${room.name || "Sala"} | LastSeen`;
+    const name = room.name || "Sala LastSeen";
+    if (roomTitle) roomTitle.textContent = name;
+    if (roomNameLabel) roomNameLabel.textContent = name;
+    document.title = `${name} | LastSeen`;
   } catch (error) {
     if (roomTitle) roomTitle.textContent = "Sala LastSeen";
     setStatus(error.message || "No se pudo cargar la sala.");
@@ -163,9 +170,8 @@ async function joinRoom() {
 }
 
 function connectSocket(roomID, nickname, pin, avatar, initialPosition) {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const params = new URLSearchParams({ nick: nickname, pin, avatar });
-  const wsURL = `${protocol}://${window.location.host}/ws/rooms/${encodeURIComponent(roomID)}?${params}`;
+  const wsURL = wsURLFor(`/ws/rooms/${encodeURIComponent(roomID)}?${params}`);
 
   socket = new WebSocket(wsURL);
 
@@ -406,13 +412,44 @@ async function shareRoomLink() {
   await copyRoomLink();
 }
 
+function apiBaseURL() {
+  const configured = String(window.LASTSEEN_API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+  return window.location.origin;
+}
+
+function apiURL(path) {
+  return `${apiBaseURL()}${path}`;
+}
+
+function wsURLFor(pathAndQuery) {
+  const base = new URL(apiBaseURL());
+  base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  return `${base.origin}${pathAndQuery}`;
+}
+
 function getRoomID() {
-  const match = window.location.pathname.match(/^\/room\/([^/]+)$/);
+  const params = new URLSearchParams(window.location.search);
+  const queryRoomID = params.get("r") || params.get("room");
+  if (queryRoomID) return queryRoomID;
+
+  const match = window.location.pathname.match(/\/room\/([^/]+)$/);
   return match?.[1] || "";
 }
 
+function extractRoomID(pathOrURL) {
+  if (!pathOrURL) return "";
+  const match = String(pathOrURL).match(/\/room\/([^/?#]+)/);
+  return match?.[1] || "";
+}
+
+function buildRoomPageURL(roomID) {
+  return new URL(`./room.html?r=${encodeURIComponent(roomID)}`, document.baseURI).toString();
+}
+
 function getAbsoluteRoomURL() {
-  return `${window.location.origin}${window.location.pathname}`;
+  const roomID = getRoomID();
+  return buildRoomPageURL(roomID);
 }
 
 function randomRoomName() {
