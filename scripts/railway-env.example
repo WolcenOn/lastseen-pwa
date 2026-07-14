@@ -1,0 +1,5 @@
+# Railway service variables for LastSeen backend
+# Do not set PORT manually; Railway injects it at runtime.
+
+ALLOWED_ORIGINS=https://wolcenon.github.io,http://localhost:8080,http://127.0.0.1:8080
+STATIC_DIR=
