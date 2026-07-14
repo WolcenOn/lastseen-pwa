@@ -14,10 +14,9 @@ WORKDIR /app
 
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /out/lastseen /app/lastseen
-COPY --from=build /src/../web /web
 
 USER app
-ENV STATIC_DIR=/web
+ENV STATIC_DIR=
 EXPOSE 8080
 
 CMD ["/app/lastseen"]
