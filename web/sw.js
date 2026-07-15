@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v7";
+const CACHE_VERSION = "lastseen-v8";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -11,7 +11,8 @@ const STATIC_ASSETS = [
   "./assets/css/app.css",
   "./assets/icons/icon.svg",
   "./src/app.js",
-  "./src/dashboard.js"
+  "./src/dashboard.js",
+  "./src/room-enhancements.js"
 ];
 
 function shouldBypassCache(request) {
