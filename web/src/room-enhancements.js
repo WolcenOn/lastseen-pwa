@@ -1,9 +1,11 @@
 const roomID = getRoomID();
 let autoJoinAttempted = false;
+let leaveHandled = false;
 
 if (roomID) {
   restoreKnownRoomIdentity(roomID);
   ensureCreatorControls(roomID);
+  wireLocalLeave(roomID);
   autoJoinKnownRoom(roomID);
   startRoomViewReconciler(roomID);
 }
@@ -51,16 +53,41 @@ function autoJoinKnownRoom(id) {
   }, 550);
 }
 
+function wireLocalLeave(id) {
+  const leaveButton = document.querySelector("#leave-room");
+  if (!leaveButton) return;
+
+  leaveButton.textContent = "Salir de la sala";
+  leaveButton.addEventListener("click", event => {
+    if (leaveHandled) return;
+    leaveHandled = true;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const state = loadRoomState(id) || { roomId: id };
+    state.lastLeftAt = new Date().toISOString();
+    state.autoJoinDisabledUntil = Date.now() + 2500;
+    saveRoomState(id, state);
+
+    const status = document.querySelector("#room-status") || document.querySelector("#status");
+    if (status) status.textContent = "Has salido de la sala. Volviendo al inicio…";
+
+    setTimeout(() => {
+      window.location.href = new URL("./", document.baseURI).toString();
+    }, 120);
+  }, { capture: true });
+}
+
 function startRoomViewReconciler(id) {
   const run = () => {
     const state = normalizeStoredRoomState(id);
     ensureCreatorControls(id, state);
-    reconcileDuplicateMemberRows(state);
-    labelAndSuppressDuplicateMarkers(state);
+    reconcileDuplicateMemberRows();
+    labelAndSuppressDuplicateMarkersFromVisibleRows();
   };
 
   run();
-  setInterval(run, 700);
+  setInterval(run, 500);
 }
 
 function normalizeStoredRoomState(id) {
@@ -92,50 +119,45 @@ function latestMembersByLogicalUser(history) {
   return normalized;
 }
 
-function reconcileDuplicateMemberRows(state) {
-  if (!state) return;
+function reconcileDuplicateMemberRows() {
   const rows = [...document.querySelectorAll("#members .member")];
-  const byKey = new Map();
+  const bestByKey = new Map();
 
   rows.forEach(row => {
     row.hidden = false;
     const key = rowLogicalKey(row);
     if (!key) return;
 
-    const previous = byKey.get(key);
-    if (!previous) {
-      byKey.set(key, row);
-      return;
+    const previous = bestByKey.get(key);
+    if (!previous || compareRows(row, previous) >= 0) {
+      bestByKey.set(key, row);
     }
+  });
 
-    const keepCurrent = rowLooksOnline(row) && !rowLooksOnline(previous);
-    if (keepCurrent) {
-      previous.hidden = true;
-      byKey.set(key, row);
-    } else {
-      row.hidden = true;
-    }
+  rows.forEach(row => {
+    const key = rowLogicalKey(row);
+    if (!key) return;
+    row.hidden = bestByKey.get(key) !== row;
   });
 }
 
-function labelAndSuppressDuplicateMarkers(state) {
-  if (!state) return;
-
-  const members = latestMembers(state);
-  if (members.length === 0) return;
+function labelAndSuppressDuplicateMarkersFromVisibleRows() {
+  const currentMembers = currentMembersFromVisibleRows();
+  if (currentMembers.length === 0) return;
 
   const queuesByAvatar = new Map();
-  members.forEach(member => {
+  currentMembers.forEach(member => {
     const avatar = String(member.avatar || "•");
     const queue = queuesByAvatar.get(avatar) || [];
     queue.push(member);
     queuesByAvatar.set(avatar, queue);
   });
 
-  const seenKeys = new Set();
-  document.querySelectorAll(".leaflet-marker-icon .member-marker").forEach(marker => {
-    marker.closest(".leaflet-marker-icon")?.classList.remove("member-marker-hidden");
+  document.querySelectorAll(".leaflet-marker-icon").forEach(outer => {
+    outer.classList.remove("member-marker-hidden");
+  });
 
+  document.querySelectorAll(".leaflet-marker-icon .member-marker").forEach(marker => {
     const avatar = markerAvatar(marker);
     const queue = queuesByAvatar.get(avatar) || [];
     const member = queue.shift();
@@ -145,14 +167,7 @@ function labelAndSuppressDuplicateMarkers(state) {
       return;
     }
 
-    const key = logicalUserKey(member);
-    if (seenKeys.has(key)) {
-      hideMarker(marker);
-      return;
-    }
-    seenKeys.add(key);
-
-    marker.dataset.userKey = key;
+    marker.dataset.userKey = logicalUserKey(member);
     marker.innerHTML = `
       <span class="member-marker-avatar">${escapeHTML(member.avatar || "•")}</span>
       <span class="member-marker-label">${escapeHTML(shortName(member.nick || "Sin mote"))}</span>
@@ -160,38 +175,28 @@ function labelAndSuppressDuplicateMarkers(state) {
   });
 }
 
+function currentMembersFromVisibleRows() {
+  return [...document.querySelectorAll("#members .member:not([hidden])")]
+    .map(rowToMember)
+    .filter(Boolean)
+    .sort((a, b) => String(a.nick || "").localeCompare(String(b.nick || "")));
+}
+
+function rowToMember(row) {
+  const avatar = row.querySelector(".avatar")?.textContent?.trim() || "";
+  const nick = row.querySelector("strong")?.textContent?.trim() || "";
+  if (!avatar && !nick) return null;
+  return {
+    avatar,
+    nick,
+    on: rowLooksOnline(row),
+    geo: row.classList.contains("geo-alert")
+  };
+}
+
 function hideMarker(marker) {
   const outer = marker.closest(".leaflet-marker-icon");
   if (outer) outer.classList.add("member-marker-hidden");
-}
-
-function latestMembers(state) {
-  const history = Object.values(state.membersHistory || {});
-  const byLogicalUser = new Map();
-
-  history.forEach(member => {
-    if (!member) return;
-    const key = logicalUserKey(member);
-    const previous = byLogicalUser.get(key);
-    if (!previous || compareMembers(member, previous) >= 0) {
-      byLogicalUser.set(key, member);
-    }
-  });
-
-  if (state.clientId && state.nickname) {
-    const self = {
-      id: state.clientId,
-      nick: state.nickname,
-      avatar: state.avatar,
-      on: true,
-      seen: new Date().toISOString()
-    };
-    const key = logicalUserKey(self);
-    const previous = byLogicalUser.get(key);
-    byLogicalUser.set(key, { ...(previous || {}), ...self });
-  }
-
-  return [...byLogicalUser.values()].sort((a, b) => String(a.nick || "").localeCompare(String(b.nick || "")));
 }
 
 function ensureCreatorControls(id, providedState = null) {
@@ -212,7 +217,9 @@ function ensureCreatorControls(id, providedState = null) {
 }
 
 function hasSavedIdentity(state) {
-  return Boolean(state?.roomId && state?.clientId && state?.nickname && state?.pin && state?.avatar);
+  if (!state?.roomId || !state?.clientId || !state?.nickname || !state?.pin || !state?.avatar) return false;
+  if (Number(state.autoJoinDisabledUntil || 0) > Date.now()) return false;
+  return true;
 }
 
 function rowLogicalKey(row) {
@@ -226,10 +233,16 @@ function rowLooksOnline(row) {
   return badge.includes("online");
 }
 
+function compareRows(left, right) {
+  if (rowLooksOnline(left) !== rowLooksOnline(right)) return rowLooksOnline(left) ? 1 : -1;
+  return 0;
+}
+
 function markerAvatar(marker) {
   const avatarNode = marker.querySelector(".member-marker-avatar");
   if (avatarNode) return avatarNode.textContent.trim();
-  return marker.childNodes.length > 0 ? String(marker.childNodes[0].textContent || marker.textContent || "•").trim().slice(0, 2) : "•";
+  const raw = String(marker.textContent || "•").trim();
+  return raw.match(/^\p{Extended_Pictographic}/u)?.[0] || raw.slice(0, 2) || "•";
 }
 
 function logicalUserKey(member) {
