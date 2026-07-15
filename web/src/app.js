@@ -17,7 +17,9 @@ const joinCard = document.querySelector("#join-card");
 const roomCard = document.querySelector("#room-card");
 const roomStatus = document.querySelector("#room-status");
 const membersEl = document.querySelector("#members");
+const mapPanel = document.querySelector(".map-panel");
 const mapEl = document.querySelector("#map");
+const mapHelp = document.querySelector("#map-help");
 const fitMapButton = document.querySelector("#fit-map");
 const setMeetingHereButton = document.querySelector("#set-meeting-here");
 const setMeetingMapButton = document.querySelector("#set-meeting-map");
@@ -84,24 +86,41 @@ function initRoom() {
 }
 
 function wireSafetyControls() {
-  if (fitMapButton) fitMapButton.addEventListener("click", fitMapToKnownPoints);
+  if (fitMapButton) {
+    fitMapButton.addEventListener("click", () => {
+      ensureMapReady();
+      scrollToMap();
+      fitMapToKnownPoints();
+    });
+  }
 
   if (setMeetingHereButton) {
     setMeetingHereButton.addEventListener("click", () => {
+      ensureMapReady();
       if (!lastOwnPosition) {
         setSafetyStatus("Aún no tengo tu ubicación para fijar el punto aquí.");
+        scrollToMap();
         return;
       }
       sendMeetingPoint(lastOwnPosition.lat, lastOwnPosition.lng);
+      scrollToMap();
     });
   }
 
   if (setMeetingMapButton) {
-    setMeetingMapButton.addEventListener("click", () => setPendingMapAction("meet"));
+    setMeetingMapButton.addEventListener("click", () => {
+      if (!ensureMapReady()) return;
+      scrollToMap();
+      setPendingMapAction("meet");
+    });
   }
 
   if (setPerimeterMapButton) {
-    setPerimeterMapButton.addEventListener("click", () => setPendingMapAction("perimeter"));
+    setPerimeterMapButton.addEventListener("click", () => {
+      if (!ensureMapReady()) return;
+      scrollToMap();
+      setPendingMapAction("perimeter");
+    });
   }
 
   if (checkInactivityButton) {
@@ -184,7 +203,11 @@ async function joinRoom() {
     const position = await getCurrentPosition();
     joinCard.hidden = true;
     roomCard.hidden = false;
-    initMap(position.coords.latitude, position.coords.longitude);
+    lastOwnPosition = {
+      lat: roundCoord(position.coords.latitude),
+      lng: roundCoord(position.coords.longitude)
+    };
+    ensureMapReady(lastOwnPosition.lat, lastOwnPosition.lng);
     connectSocket(roomID, nickname, pin, selectedAvatar, position);
     startLocationWatch();
   } catch (error) {
@@ -253,6 +276,27 @@ function handleServerMessage(msg) {
   if (msg.t === "panic") setRoomStatus("Alerta de pánico recibida en la sala.");
 }
 
+function ensureMapReady(lat = lastOwnPosition?.lat, lng = lastOwnPosition?.lng) {
+  if (!mapEl) return false;
+
+  mapPanel?.classList.remove("map-unavailable");
+
+  if (typeof L === "undefined") {
+    mapPanel?.classList.add("map-unavailable");
+    mapEl.innerHTML = '<div class="map-fallback">No se pudo cargar el mapa. Revisa conexión o recarga la PWA.</div>';
+    setSafetyStatus("No se pudo cargar Leaflet. Recarga la página para reintentar el mapa.");
+    return false;
+  }
+
+  if (!map) {
+    initMap(lat || DEFAULT_MAP_CENTER[0], lng || DEFAULT_MAP_CENTER[1]);
+  } else {
+    setTimeout(() => map.invalidateSize(), 80);
+  }
+
+  return Boolean(map);
+}
+
 function initMap(lat, lng) {
   if (!mapEl || map || typeof L === "undefined") return;
 
@@ -275,7 +319,21 @@ function initMap(lat, lng) {
     }
   });
 
-  setTimeout(() => map.invalidateSize(), 150);
+  if (mapHelp) {
+    mapHelp.textContent = "Los avatares muestran la última ubicación recibida. Pulsa 'Punto en mapa' o 'Dibujar perímetro' y luego toca el mapa.";
+  }
+
+  setTimeout(() => {
+    map.invalidateSize();
+    renderMapMarkers();
+    renderMeetingPoint();
+    renderPerimeter();
+  }, 150);
+}
+
+function scrollToMap() {
+  mapPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (map) setTimeout(() => map.invalidateSize(), 250);
 }
 
 function renderMapMarkers() {
@@ -365,7 +423,7 @@ function renderPerimeter() {
 }
 
 function fitMapToKnownPoints() {
-  if (!map || typeof L === "undefined") return;
+  if (!ensureMapReady()) return;
 
   const points = [];
   for (const member of members.values()) {
@@ -374,11 +432,14 @@ function fitMapToKnownPoints() {
   if (safety.meetingPoint) points.push([safety.meetingPoint.lat, safety.meetingPoint.lng]);
   if (safety.perimeter) points.push([safety.perimeter.lat, safety.perimeter.lng]);
 
+  if (points.length === 0 && lastOwnPosition) points.push([lastOwnPosition.lat, lastOwnPosition.lng]);
   if (points.length === 0) return;
+
   map.fitBounds(L.latLngBounds(points), { padding: [36, 36], maxZoom: 17 });
 }
 
 function setPendingMapAction(action) {
+  if (!ensureMapReady()) return;
   pendingMapAction = action;
   setSafetyStatus(action === "meet" ? "Toca el mapa para fijar el punto de encuentro." : "Toca el mapa para centrar el perímetro.");
 }
@@ -432,12 +493,16 @@ function stopLocationWatch() {
 }
 
 function sendLocation(position) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-
   lastOwnPosition = {
     lat: roundCoord(position.coords.latitude),
     lng: roundCoord(position.coords.longitude)
   };
+
+  if (map) {
+    setTimeout(() => map.invalidateSize(), 40);
+  }
+
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
   socket.send(JSON.stringify({
     t: batteryLevel > 0 && batteryLevel <= 0.02 ? "sos" : "loc",
