@@ -1,6 +1,7 @@
 const roomID = getRoomID();
 let autoJoinAttempted = false;
 let leaveHandled = false;
+let reconcileBusy = false;
 
 if (roomID) {
   restoreKnownRoomIdentity(roomID);
@@ -79,15 +80,36 @@ function wireLocalLeave(id) {
 }
 
 function startRoomViewReconciler(id) {
-  const run = () => {
-    const state = normalizeStoredRoomState(id);
-    ensureCreatorControls(id, state);
-    reconcileDuplicateMemberRows();
-    labelAndSuppressDuplicateMarkersFromVisibleRows();
-  };
-
+  const run = () => reconcileRoomView(id);
   run();
-  setInterval(run, 500);
+
+  const membersEl = document.querySelector("#members");
+  if (membersEl) {
+    new MutationObserver(() => scheduleReconcile(id)).observe(membersEl, { childList: true, subtree: true });
+  }
+
+  const mapEl = document.querySelector("#map");
+  if (mapEl) {
+    new MutationObserver(() => scheduleReconcile(id)).observe(mapEl, { childList: true, subtree: true });
+  }
+
+  setInterval(run, 350);
+}
+
+function scheduleReconcile(id) {
+  if (reconcileBusy) return;
+  reconcileBusy = true;
+  requestAnimationFrame(() => {
+    reconcileBusy = false;
+    reconcileRoomView(id);
+  });
+}
+
+function reconcileRoomView(id) {
+  const state = normalizeStoredRoomState(id);
+  ensureCreatorControls(id, state);
+  reconcileDuplicateMemberRows();
+  labelAndSuppressDuplicateMarkersFromVisibleRows();
 }
 
 function normalizeStoredRoomState(id) {
@@ -121,31 +143,32 @@ function latestMembersByLogicalUser(history) {
 
 function reconcileDuplicateMemberRows() {
   const rows = [...document.querySelectorAll("#members .member")];
-  const bestByKey = new Map();
+  if (rows.length < 2) return;
 
-  rows.forEach(row => {
-    row.hidden = false;
+  const bestByKey = new Map();
+  rows.forEach((row, index) => {
     const key = rowLogicalKey(row);
     if (!key) return;
 
+    const candidate = { row, score: rowScore(row, index) };
     const previous = bestByKey.get(key);
-    if (!previous || compareRows(row, previous) >= 0) {
-      bestByKey.set(key, row);
+    if (!previous || candidate.score >= previous.score) {
+      bestByKey.set(key, candidate);
     }
   });
 
   rows.forEach(row => {
     const key = rowLogicalKey(row);
     if (!key) return;
-    row.hidden = bestByKey.get(key) !== row;
+    const keep = bestByKey.get(key)?.row;
+    if (keep && keep !== row) row.remove();
   });
 }
 
 function labelAndSuppressDuplicateMarkersFromVisibleRows() {
   const currentMembers = currentMembersFromVisibleRows();
-  if (currentMembers.length === 0) return;
-
   const queuesByAvatar = new Map();
+
   currentMembers.forEach(member => {
     const avatar = String(member.avatar || "•");
     const queue = queuesByAvatar.get(avatar) || [];
@@ -176,7 +199,7 @@ function labelAndSuppressDuplicateMarkersFromVisibleRows() {
 }
 
 function currentMembersFromVisibleRows() {
-  return [...document.querySelectorAll("#members .member:not([hidden])")]
+  return [...document.querySelectorAll("#members .member")]
     .map(rowToMember)
     .filter(Boolean)
     .sort((a, b) => String(a.nick || "").localeCompare(String(b.nick || "")));
@@ -233,9 +256,11 @@ function rowLooksOnline(row) {
   return badge.includes("online");
 }
 
-function compareRows(left, right) {
-  if (rowLooksOnline(left) !== rowLooksOnline(right)) return rowLooksOnline(left) ? 1 : -1;
-  return 0;
+function rowScore(row, index) {
+  const online = rowLooksOnline(row) ? 1000000 : 0;
+  const text = row.textContent || "";
+  const hasCoords = /-?\d+\.\d+/.test(text) ? 10000 : 0;
+  return online + hasCoords + index;
 }
 
 function markerAvatar(marker) {
