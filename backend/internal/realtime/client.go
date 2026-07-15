@@ -11,18 +11,20 @@ import (
 const sendBufferSize = 16
 
 type ClientConfig struct {
-	ID       string
-	Nickname string
-	PIN      string
-	Avatar   string
-	Conn     *websocket.Conn
+	ID        string
+	SessionID string
+	Nickname  string
+	PIN       string
+	Avatar    string
+	Conn      *websocket.Conn
 }
 
 type Client struct {
-	ID       string
-	Nickname string
-	PIN      string
-	Avatar   string
+	ID        string
+	SessionID string
+	Nickname  string
+	PIN       string
+	Avatar    string
 
 	Conn *websocket.Conn
 	send chan OutboundMessage
@@ -41,6 +43,7 @@ type Client struct {
 func NewClient(config ClientConfig) *Client {
 	return &Client{
 		ID:        config.ID,
+		SessionID: config.SessionID,
 		Nickname:  config.Nickname,
 		PIN:       config.PIN,
 		Avatar:    config.Avatar,
@@ -53,7 +56,7 @@ func NewClient(config ClientConfig) *Client {
 
 func (c *Client) ReadPump(hub *Hub, roomID string) {
 	defer func() {
-		hub.LeaveRoom(roomID, c.ID)
+		hub.LeaveRoom(roomID, c.ID, c.SessionID)
 		_ = c.Conn.Close()
 	}()
 
@@ -73,7 +76,7 @@ func (c *Client) ReadPump(hub *Hub, roomID string) {
 		var msg InboundMessage
 		if err := c.Conn.ReadJSON(&msg); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("websocket read error client=%s err=%v", c.ID, err)
+				log.Printf("websocket read error client=%s session=%s err=%v", c.ID, c.SessionID, err)
 			}
 			return
 		}
