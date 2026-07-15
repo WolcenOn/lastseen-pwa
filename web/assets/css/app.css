@@ -55,7 +55,7 @@ input, select {
 }
 
 button { cursor: pointer; color: #04111f; background: #38bdf8; font-weight: 800; }
-button:disabled { cursor: wait; opacity: 0.7; }
+button:disabled { cursor: not-allowed; opacity: 0.45; }
 button.secondary { background: transparent; color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.3); }
 button.danger { background: #fb7185; color: #450a0a; }
 
@@ -112,6 +112,24 @@ button.danger { background: #fb7185; color: #450a0a; }
 .creator-panel {
   border-color: rgba(250, 204, 21, 0.42);
   background: rgba(113, 63, 18, 0.22);
+}
+
+.creator-panel.locked {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.creator-panel.locked h3::after {
+  content: " bloqueado";
+  display: inline-flex;
+  margin-left: 8px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .creator-panel h3,
