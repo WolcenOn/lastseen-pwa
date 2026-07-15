@@ -40,7 +40,7 @@
         <p id="room-status" class="status" aria-live="polite"></p>
         <section id="creator-panel" class="creator-panel" hidden>
           <h3>Gestión del creador</h3>
-          <p class="hint">Estos controles solo aparecen en este dispositivo porque creó la sala.</p>
+          <p class="hint" id="creator-help">Estos controles solo aparecen activos en el dispositivo que creó la sala.</p>
           <div class="safety-grid">
             <label for="room-ttl-minutes">Duración</label>
             <select id="room-ttl-minutes">
@@ -101,5 +101,39 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="./config.js"></script>
     <script type="module" src="./src/app.js"></script>
+    <script>
+      window.addEventListener("load", () => {
+        const params = new URLSearchParams(window.location.search);
+        const roomID = params.get("r") || params.get("room") || "";
+        if (!roomID) return;
+
+        const panel = document.querySelector("#creator-panel");
+        const status = document.querySelector("#creator-status");
+        const help = document.querySelector("#creator-help");
+        if (!panel) return;
+
+        let state = {};
+        try {
+          state = JSON.parse(localStorage.getItem(`lastseen:${roomID}:state`) || "{}");
+        } catch {
+          state = {};
+        }
+
+        if (state.creatorToken) return;
+
+        panel.hidden = false;
+        panel.classList.add("locked");
+        panel.querySelectorAll("select, button").forEach(control => {
+          control.disabled = true;
+        });
+
+        if (help) {
+          help.textContent = "Gestión no disponible en este dispositivo: solo se activa en el navegador que creó esta sala y en salas creadas con la versión nueva.";
+        }
+        if (status) {
+          status.textContent = "Crea una sala nueva desde este dispositivo para ver estos controles activos.";
+        }
+      });
+    </script>
   </body>
 </html>
