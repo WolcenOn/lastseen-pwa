@@ -47,12 +47,14 @@ type OutboundMessage struct {
 }
 
 type PublicRoom struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	CreatedAt time.Time      `json:"createdAt"`
-	ExpiresIn int64          `json:"expiresIn"`
-	MaxFree   int            `json:"maxFree"`
-	Safety    PublicSafety   `json:"safety"`
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	CreatedAt time.Time    `json:"createdAt"`
+	ExpiresIn int64        `json:"expiresIn"`
+	TTL       int64        `json:"ttl"`
+	MaxFree   int          `json:"maxFree"`
+	Closed    bool         `json:"closed"`
+	Safety    PublicSafety `json:"safety"`
 }
 
 type PublicSafety struct {
