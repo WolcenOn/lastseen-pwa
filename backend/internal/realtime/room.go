@@ -5,9 +5,15 @@ import (
 	"time"
 )
 
+const (
+	MinRoomTTL = 15 * time.Minute
+	MaxRoomTTL = 24 * time.Hour
+)
+
 type RoomConfig struct {
 	ID             string
 	Name           string
+	CreatorToken   string
 	TTL            time.Duration
 	MaxFreeClients int
 }
@@ -17,8 +23,10 @@ type Room struct {
 
 	ID             string
 	Name           string
+	CreatorToken   string
 	TTL            time.Duration
 	MaxFreeClients int
+	Closed         bool
 
 	CreatedAt      time.Time
 	LastActivityAt time.Time
@@ -30,9 +38,17 @@ type Room struct {
 func NewRoom(config RoomConfig) *Room {
 	now := time.Now().UTC()
 
+	if config.TTL < MinRoomTTL {
+		config.TTL = MinRoomTTL
+	}
+	if config.TTL > MaxRoomTTL {
+		config.TTL = MaxRoomTTL
+	}
+
 	return &Room{
 		ID:             config.ID,
 		Name:           config.Name,
+		CreatorToken:   config.CreatorToken,
 		TTL:            config.TTL,
 		MaxFreeClients: config.MaxFreeClients,
 		CreatedAt:      now,
@@ -45,17 +61,16 @@ func (r *Room) Public(now time.Time) PublicRoom {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	remaining := r.TTL - now.Sub(r.LastActivityAt)
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := r.remainingLocked(now)
 
 	return PublicRoom{
 		ID:        r.ID,
 		Name:      r.Name,
 		CreatedAt: r.CreatedAt,
 		ExpiresIn: int64(remaining.Seconds()),
+		TTL:       int64(r.TTL.Seconds()),
 		MaxFree:   r.MaxFreeClients,
+		Closed:    r.Closed,
 		Safety:    cloneSafety(r.safety),
 	}
 }
@@ -64,32 +79,50 @@ func (r *Room) AddClient(client *Client) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.Closed || r.remainingLocked(time.Now().UTC()) <= 0 {
+		return ErrRoomClosed
+	}
+
 	activeCount := 0
-	for _, c := range r.clients {
+	for id, c := range r.clients {
+		if id == client.ID {
+			continue
+		}
 		if c.Connected {
 			activeCount++
 		}
 	}
 
-	if activeCount >= r.MaxFreeClients {
+	if _, reconnecting := r.clients[client.ID]; !reconnecting && activeCount >= r.MaxFreeClients {
 		return ErrRoomFull
+	}
+
+	if previous, ok := r.clients[client.ID]; ok {
+		client.Lat = previous.Lat
+		client.Lng = previous.Lng
+		client.BatteryLevel = previous.BatteryLevel
+		client.GeofenceAlert = previous.GeofenceAlert
+		client.SOS = previous.SOS
+		if !previous.LastSeen.IsZero() {
+			client.LastSeen = previous.LastSeen
+		}
+		previous.Close()
 	}
 
 	client.Connected = true
 	client.LastSeen = time.Now().UTC()
-
 	r.clients[client.ID] = client
 	r.touchLocked()
 
 	return nil
 }
 
-func (r *Room) MarkDisconnected(clientID string) (*Client, bool) {
+func (r *Room) MarkDisconnected(clientID string, sessionID string) (*Client, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	client, ok := r.clients[clientID]
-	if !ok {
+	if !ok || client.SessionID != sessionID {
 		return nil, false
 	}
 
@@ -122,7 +155,7 @@ func (r *Room) UpdateLocation(clientID string, msg InboundMessage) {
 	r.mu.Lock()
 
 	client, ok := r.clients[clientID]
-	if !ok {
+	if !ok || r.Closed {
 		r.mu.Unlock()
 		return
 	}
@@ -145,7 +178,7 @@ func (r *Room) MarkSOS(clientID string, msg InboundMessage) {
 	r.mu.Lock()
 
 	client, ok := r.clients[clientID]
-	if !ok {
+	if !ok || r.Closed {
 		r.mu.Unlock()
 		return
 	}
@@ -194,9 +227,42 @@ func (r *Room) SetPerimeter(clientID string, msg InboundMessage) PublicPerimeter
 	}
 
 	r.safety.Perimeter = &perimeter
+	for _, client := range r.clients {
+		if validLatLng(client.Lat, client.Lng) {
+			client.GeofenceAlert = r.isOutsidePerimeterLocked(client.Lat, client.Lng)
+		}
+	}
 	r.touchLocked()
 
 	return perimeter
+}
+
+func (r *Room) UpdateTTL(ttl time.Duration) (PublicRoom, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if ttl < MinRoomTTL || ttl > MaxRoomTTL || r.Closed {
+		return PublicRoom{}, false
+	}
+
+	r.TTL = ttl
+	r.touchLocked()
+	return r.publicLocked(time.Now().UTC()), true
+}
+
+func (r *Room) End() PublicRoom {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.Closed = true
+	r.touchLocked()
+	for _, client := range r.clients {
+		client.Connected = false
+		client.LastSeen = time.Now().UTC()
+		client.CloseSend()
+	}
+
+	return r.publicLocked(time.Now().UTC())
 }
 
 func (r *Room) SendSnapshot(client *Client) {
@@ -212,22 +278,10 @@ func (r *Room) Snapshot() RoomSnapshot {
 		clients = append(clients, client.toPublicLocked())
 	}
 
-	remaining := r.TTL - time.Since(r.LastActivityAt)
-	if remaining < 0 {
-		remaining = 0
-	}
-
 	safety := cloneSafety(r.safety)
 
 	return RoomSnapshot{
-		Room: PublicRoom{
-			ID:        r.ID,
-			Name:      r.Name,
-			CreatedAt: r.CreatedAt,
-			ExpiresIn: int64(remaining.Seconds()),
-			MaxFree:   r.MaxFreeClients,
-			Safety:    safety,
-		},
+		Room:    r.publicLocked(time.Now().UTC()),
 		Clients: clients,
 		Safety:  safety,
 	}
@@ -264,13 +318,7 @@ func (r *Room) IsExpired(now time.Time) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, client := range r.clients {
-		if client.Connected {
-			return false
-		}
-	}
-
-	return now.Sub(r.LastActivityAt) > r.TTL
+	return r.Closed || r.remainingLocked(now) <= 0
 }
 
 func (r *Room) Close() {
@@ -286,6 +334,28 @@ func (r *Room) Close() {
 
 func (r *Room) touchLocked() {
 	r.LastActivityAt = time.Now().UTC()
+}
+
+func (r *Room) remainingLocked(now time.Time) time.Duration {
+	remaining := r.TTL - now.Sub(r.CreatedAt)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func (r *Room) publicLocked(now time.Time) PublicRoom {
+	remaining := r.remainingLocked(now)
+	return PublicRoom{
+		ID:        r.ID,
+		Name:      r.Name,
+		CreatedAt: r.CreatedAt,
+		ExpiresIn: int64(remaining.Seconds()),
+		TTL:       int64(r.TTL.Seconds()),
+		MaxFree:   r.MaxFreeClients,
+		Closed:    r.Closed,
+		Safety:    cloneSafety(r.safety),
+	}
 }
 
 func (r *Room) isOutsidePerimeterLocked(lat float64, lng float64) bool {

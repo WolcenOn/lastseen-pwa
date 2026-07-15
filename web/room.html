@@ -7,12 +7,7 @@
     <title>Sala | LastSeen</title>
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./assets/icons/icon.svg" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
-    />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <link rel="stylesheet" href="./assets/css/app.css" />
   </head>
   <body>
@@ -21,24 +16,19 @@
         <p id="room-name" class="eyebrow">Sala efímera</p>
         <h1>Entrar</h1>
         <p>Usa un mote temporal. No pedimos email ni teléfono.</p>
-
         <label for="nickname">Mote</label>
         <input id="nickname" autocomplete="nickname" maxlength="24" placeholder="Tu mote" />
-
         <label for="pin">PIN privado para salir</label>
         <div class="inline-control">
           <input id="pin" inputmode="numeric" maxlength="6" placeholder="PIN" />
           <button id="random-pin" class="secondary compact" type="button">🎲</button>
         </div>
-
         <label for="avatar">Avatar</label>
         <div id="avatar-picker" class="avatar-picker" role="listbox" aria-label="Elige avatar"></div>
         <input id="avatar" type="hidden" />
-
         <button id="join-room" type="button">Compartir ubicación</button>
         <p id="status" class="status" aria-live="polite"></p>
       </section>
-
       <section class="card" id="room-card" hidden>
         <p id="room-title" class="eyebrow">Sala</p>
         <h2>Grupo</h2>
@@ -48,7 +38,24 @@
           <button id="share-link" class="secondary" type="button">Compartir</button>
         </div>
         <p id="room-status" class="status" aria-live="polite"></p>
-
+        <section id="creator-panel" class="creator-panel" hidden>
+          <h3>Gestión del creador</h3>
+          <p class="hint">Estos controles solo aparecen en este dispositivo porque creó la sala.</p>
+          <div class="safety-grid">
+            <label for="room-ttl-minutes">Duración</label>
+            <select id="room-ttl-minutes">
+              <option value="30">30 min</option>
+              <option value="60">1 h</option>
+              <option value="180" selected>3 h</option>
+              <option value="360">6 h</option>
+              <option value="720">12 h</option>
+              <option value="1440">24 h</option>
+            </select>
+            <button id="update-room-ttl" class="secondary" type="button">Actualizar duración</button>
+          </div>
+          <button id="end-room" class="danger" type="button">Terminar sala</button>
+          <p id="creator-status" class="hint" aria-live="polite"></p>
+        </section>
         <section class="map-panel" aria-label="Mapa de la sala">
           <div id="map" class="map" role="application" aria-label="Mapa con miembros de la sala"></div>
           <div class="map-actions">
@@ -58,7 +65,6 @@
           </div>
           <p id="map-help" class="hint">Los avatares muestran la última ubicación recibida. El punto de encuentro se comparte con toda la sala.</p>
         </section>
-
         <details class="safety-panel">
           <summary>Opciones de seguridad <span class="premium-pill">premium-ready</span></summary>
           <div class="safety-grid">
@@ -81,19 +87,18 @@
             </select>
             <button id="check-inactivity" class="secondary" type="button">Revisar ahora</button>
           </div>
-          <p id="safety-status" class="hint">Base premium: perímetro, inactividad, pánico y rescate quedan preparados sin guardar datos persistentes.</p>
+          <p id="safety-status" class="hint">Base premium: perímetro, inactividad, pánico y rescate quedan preparados sin guardar datos persistentes en servidor.</p>
         </details>
-
+        <section class="history-panel">
+          <h3>Historial local de seguridad</h3>
+          <p class="hint">Últimas señales guardadas solo en este navegador.</p>
+          <div id="history" class="member-list"></div>
+        </section>
         <div id="members" class="member-list"></div>
         <button id="leave-room" class="danger" type="button">Salir</button>
       </section>
     </main>
-
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="./config.js"></script>
     <script type="module" src="./src/app.js"></script>
   </body>

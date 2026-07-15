@@ -10,6 +10,8 @@ import (
 var (
 	ErrRoomNotFound = errors.New("room not found")
 	ErrRoomFull     = errors.New("room is full for free tier")
+	ErrRoomClosed   = errors.New("room is closed")
+	ErrForbidden    = errors.New("creator token is invalid")
 )
 
 type HubConfig struct {
@@ -58,14 +60,15 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-func (h *Hub) CreateRoom(id string, name string) *Room {
+func (h *Hub) CreateRoom(id string, name string, creatorToken string, ttl time.Duration) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	room := NewRoom(RoomConfig{
 		ID:             id,
 		Name:           name,
-		TTL:            h.config.RoomTTL,
+		CreatorToken:   creatorToken,
+		TTL:            ttl,
 		MaxFreeClients: h.config.MaxFreeClients,
 	})
 
@@ -107,6 +110,8 @@ func (h *Hub) JoinRoom(roomID string, client *Client) error {
 			ID:        client.ID,
 			Nickname:  client.Nickname,
 			Avatar:    client.Avatar,
+			Lat:       client.Lat,
+			Lng:       client.Lng,
 			Connected: true,
 			LastSeen:  time.Now().UTC(),
 		},
@@ -115,13 +120,13 @@ func (h *Hub) JoinRoom(roomID string, client *Client) error {
 	return nil
 }
 
-func (h *Hub) LeaveRoom(roomID string, clientID string) {
+func (h *Hub) LeaveRoom(roomID string, clientID string, sessionID string) {
 	room, ok := h.GetRoom(roomID)
 	if !ok {
 		return
 	}
 
-	client, existed := room.MarkDisconnected(clientID)
+	client, existed := room.MarkDisconnected(clientID, sessionID)
 	if !existed {
 		return
 	}
@@ -167,6 +172,42 @@ func (h *Hub) HandleClientMessage(roomID string, clientID string, msg InboundMes
 		perimeter := room.SetPerimeter(clientID, msg)
 		room.Broadcast(OutboundMessage{Type: "perimeter", Data: perimeter})
 	}
+}
+
+func (h *Hub) UpdateRoomTTL(roomID string, creatorToken string, ttl time.Duration) (PublicRoom, error) {
+	room, ok := h.GetRoom(roomID)
+	if !ok {
+		return PublicRoom{}, ErrRoomNotFound
+	}
+	if room.CreatorToken == "" || room.CreatorToken != creatorToken {
+		return PublicRoom{}, ErrForbidden
+	}
+
+	public, ok := room.UpdateTTL(ttl)
+	if !ok {
+		return PublicRoom{}, ErrRoomClosed
+	}
+	room.Broadcast(OutboundMessage{Type: "room", Data: public})
+	return public, nil
+}
+
+func (h *Hub) EndRoom(roomID string, creatorToken string) (PublicRoom, error) {
+	h.mu.Lock()
+	room, ok := h.rooms[roomID]
+	if !ok {
+		h.mu.Unlock()
+		return PublicRoom{}, ErrRoomNotFound
+	}
+	if room.CreatorToken == "" || room.CreatorToken != creatorToken {
+		h.mu.Unlock()
+		return PublicRoom{}, ErrForbidden
+	}
+	delete(h.rooms, roomID)
+	h.mu.Unlock()
+
+	public := room.End()
+	room.Broadcast(OutboundMessage{Type: "room-ended", Data: public})
+	return public, nil
 }
 
 func (h *Hub) CleanupExpiredRooms() {
