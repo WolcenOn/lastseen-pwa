@@ -10,8 +10,9 @@
     <link rel="stylesheet" href="./assets/css/app.css" />
   </head>
   <body>
-    <main class="hero">
+    <main class="hero dashboard-shell">
       <section class="card">
+        <p class="eyebrow">Coordinación efímera</p>
         <h1>LastSeen</h1>
         <p>Salas efímeras para compartir ubicación en grupo sin registro, sin descarga y sin base de datos.</p>
 
@@ -21,12 +22,40 @@
           <button id="random-room-name" class="secondary compact" type="button">🎲</button>
         </div>
 
-        <button id="create-room" type="button">Crear sala segura</button>
+        <button id="create-room" type="button">Crear sala nueva</button>
         <p id="status" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card dashboard-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Mis salas</p>
+            <h2>Entrar o revisar historial</h2>
+          </div>
+          <button id="refresh-room-dashboard" class="secondary compact-wide" type="button">Actualizar</button>
+        </div>
+        <p class="hint">Se muestran las salas guardadas en este navegador. El historial es local y no se sube al servidor.</p>
+        <div id="room-dashboard" class="room-dashboard" aria-live="polite"></div>
       </section>
     </main>
 
+    <template id="room-card-template">
+      <article class="saved-room-card">
+        <div class="saved-room-main">
+          <span class="badge room-state-badge">estado</span>
+          <h3 class="saved-room-title">Sala</h3>
+          <p class="hint saved-room-meta"></p>
+        </div>
+        <div class="saved-room-actions"></div>
+        <details class="saved-room-history">
+          <summary>Historial local</summary>
+          <div class="saved-room-members member-list"></div>
+        </details>
+      </article>
+    </template>
+
     <script src="./config.js"></script>
     <script type="module" src="./src/app.js"></script>
+    <script type="module" src="./src/dashboard.js"></script>
   </body>
 </html>
