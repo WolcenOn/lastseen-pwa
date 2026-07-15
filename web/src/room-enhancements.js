@@ -61,11 +61,26 @@ function wireLocalLeave(id) {
   leaveButton.textContent = "Salir de la sala";
   leaveButton.addEventListener("click", event => {
     if (leaveHandled) return;
-    leaveHandled = true;
     event.preventDefault();
     event.stopImmediatePropagation();
 
     const state = loadRoomState(id) || { roomId: id };
+    const savedPIN = String(state.pin || "").trim();
+    if (savedPIN) {
+      const enteredPIN = window.prompt("Introduce tu PIN para salir de la sala:");
+      if (enteredPIN === null) return;
+      if (String(enteredPIN).trim() !== savedPIN) {
+        const status = document.querySelector("#room-status") || document.querySelector("#status");
+        if (status) status.textContent = "PIN incorrecto. No se ha salido de la sala.";
+        return;
+      }
+    } else if (!window.confirm("No hay PIN guardado para esta sesión. ¿Salir de la sala igualmente?")) {
+      return;
+    }
+
+    leaveHandled = true;
+    trySendSelfDisconnect(savedPIN);
+
     state.lastLeftAt = new Date().toISOString();
     state.autoJoinDisabledUntil = Date.now() + 2500;
     saveRoomState(id, state);
@@ -75,8 +90,19 @@ function wireLocalLeave(id) {
 
     setTimeout(() => {
       window.location.href = new URL("./", document.baseURI).toString();
-    }, 120);
+    }, 160);
   }, { capture: true });
+}
+
+function trySendSelfDisconnect(pin) {
+  try {
+    if (typeof socket !== "undefined" && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ t: "disconnect", pin }));
+      socket.close(1000, "user left");
+    }
+  } catch {
+    // Best effort only. Navigation will close the WebSocket if this fails.
+  }
 }
 
 function startRoomViewReconciler(id) {
@@ -116,6 +142,7 @@ function normalizeStoredRoomState(id) {
   const state = loadRoomState(id);
   if (!state) return null;
 
+  if (state.creatorToken && !state.isCreator) state.isCreator = true;
   state.membersHistory = latestMembersByLogicalUser(state.membersHistory || {});
   saveRoomState(id, state);
   return state;
@@ -225,7 +252,24 @@ function hideMarker(marker) {
 function ensureCreatorControls(id, providedState = null) {
   const state = providedState || loadRoomState(id);
   const panel = document.querySelector("#creator-panel");
-  if (!panel || !state?.creatorToken) return;
+  if (!panel) return;
+
+  const help = document.querySelector("#creator-help");
+  const status = document.querySelector("#creator-status");
+
+  if (!state?.creatorToken) {
+    panel.hidden = false;
+    panel.classList.add("locked");
+    panel.querySelectorAll("select, button").forEach(control => {
+      control.disabled = true;
+    });
+    if (help) help.textContent = "Gestión bloqueada: este dispositivo no conserva el token de creador de esta sala.";
+    if (status && !status.textContent) status.textContent = "Crea una sala nueva con la versión actual para guardar el token de creador.";
+    return;
+  }
+
+  state.isCreator = true;
+  saveRoomState(id, state);
 
   panel.hidden = false;
   panel.classList.remove("locked");
@@ -233,8 +277,6 @@ function ensureCreatorControls(id, providedState = null) {
     control.disabled = false;
   });
 
-  const help = document.querySelector("#creator-help");
-  const status = document.querySelector("#creator-status");
   if (help) help.textContent = "Gestión activa: este navegador conserva el token de creador de esta sala.";
   if (status && !status.textContent) status.textContent = "Puedes modificar duración o terminar la sala.";
 }
