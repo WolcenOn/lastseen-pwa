@@ -70,7 +70,8 @@ label {
 }
 
 button,
-input {
+input,
+select {
   width: 100%;
   border: 0;
   border-radius: 16px;
@@ -78,7 +79,8 @@ input {
   font: inherit;
 }
 
-input {
+input,
+select {
   margin-bottom: 12px;
   background: #111827;
   color: #f8fafc;
@@ -122,6 +124,12 @@ button.danger {
   color: #93c5fd;
 }
 
+.hint {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 0.88rem;
+}
+
 .mono {
   overflow-wrap: anywhere;
   color: #bae6fd;
@@ -129,27 +137,42 @@ button.danger {
   font-size: 0.85rem;
 }
 
-.inline-field {
+.inline-field,
+.inline-control {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: start;
 }
 
-.inline-field input {
+.inline-field input,
+.inline-control input {
   margin-bottom: 12px;
 }
 
+.compact,
 .icon-button {
   width: 56px;
   min-width: 56px;
   padding: 16px 0;
 }
 
-.button-grid {
+.button-grid,
+.share-box,
+.map-actions,
+.safety-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.share-box {
+  grid-template-columns: 1fr auto auto;
+}
+
+.share-box button {
+  width: auto;
+  white-space: nowrap;
 }
 
 .room-shell {
@@ -195,6 +218,85 @@ button.danger {
   background: rgba(56, 189, 248, 0.18);
 }
 
+.map-panel {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.map {
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  border-radius: 22px;
+  background: #020617;
+}
+
+.leaflet-container {
+  background: #020617;
+  color: #0f172a;
+}
+
+.member-marker {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 3px solid #38bdf8;
+  border-radius: 999px;
+  background: #0f172a;
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.36);
+  font-size: 1.25rem;
+}
+
+.member-marker.offline {
+  border-color: #fb923c;
+  opacity: 0.72;
+}
+
+.member-marker.alert {
+  border-color: #fb7185;
+  box-shadow: 0 0 0 6px rgba(251, 113, 133, 0.22), 0 12px 28px rgba(2, 6, 23, 0.36);
+}
+
+.meeting-marker {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: #facc15;
+  border: 3px solid #713f12;
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.36);
+  font-size: 1.3rem;
+}
+
+.safety-panel {
+  margin: 16px 0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(2, 6, 23, 0.38);
+}
+
+.safety-panel summary {
+  cursor: pointer;
+  font-weight: 900;
+  color: #e0f2fe;
+}
+
+.premium-pill {
+  display: inline-flex;
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(250, 204, 21, 0.16);
+  color: #fde68a;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .member-list {
   display: grid;
   gap: 8px;
@@ -209,6 +311,11 @@ button.danger {
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.74);
   border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.member.geo-alert {
+  border-color: rgba(251, 113, 133, 0.7);
+  background: rgba(127, 29, 29, 0.34);
 }
 
 .avatar {
@@ -239,6 +346,10 @@ button.danger {
   background: #f97316;
 }
 
+.badge.alert {
+  background: #fb7185;
+}
+
 @media (max-width: 520px) {
   main {
     padding: 16px;
@@ -249,15 +360,20 @@ button.danger {
     border-radius: 20px;
   }
 
-  .button-grid {
+  .button-grid,
+  .room-actions,
+  .share-box,
+  .map-actions,
+  .safety-grid {
     grid-template-columns: 1fr;
   }
 
-  .room-actions {
-    grid-template-columns: 1fr;
-  }
-
+  .share-box button,
   .room-actions .danger {
     width: 100%;
+  }
+
+  .map {
+    min-height: 320px;
   }
 }
