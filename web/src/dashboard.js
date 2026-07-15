@@ -104,7 +104,7 @@ function normalizeRoomState(roomID, state) {
     nickname: state.nickname || "",
     avatar: state.avatar || "",
     pin: state.pin || "",
-    isCreator: Boolean(state.isCreator),
+    isCreator: Boolean(state.isCreator || state.creatorToken),
     creatorToken: state.creatorToken || "",
     ttl: Number(state.ttl || 0),
     createdAt: state.createdAt || "",
@@ -116,7 +116,7 @@ function normalizeRoomState(roomID, state) {
     serverRoom: null
   };
 
-  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length) {
+  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length || normalized.isCreator !== Boolean(state.isCreator)) {
     saveRoomState(normalized.roomId, normalized);
   }
 
@@ -131,6 +131,7 @@ async function enrichRoomState(room) {
     const serverRoom = await response.json();
     const enriched = {
       ...room,
+      isCreator: Boolean(room.isCreator || room.creatorToken),
       active: true,
       localOnly: false,
       serverRoom,
@@ -162,7 +163,7 @@ function roomScore(room) {
 
 function sortRoomsForDashboard(left, right) {
   if (left.active !== right.active) return left.active ? -1 : 1;
-  if (left.isCreator !== right.isCreator) return left.isCreator ? -1 : 1;
+  if (Boolean(left.isCreator || left.creatorToken) !== Boolean(right.isCreator || right.creatorToken)) return (left.isCreator || left.creatorToken) ? -1 : 1;
   return lastActivityTime(right) - lastActivityTime(left);
 }
 
@@ -184,15 +185,18 @@ function renderSavedRoom(room) {
   const members = node.querySelector(".saved-room-members");
 
   const history = Object.values(dedupeMembersHistory(room.membersHistory || {}));
+  const canManage = Boolean(room.creatorToken);
+  const createdHere = Boolean(room.isCreator || room.creatorToken);
+
   badge.textContent = room.active ? "activa" : "historial";
   badge.classList.toggle("offline", !room.active);
-  badge.classList.toggle("creator-badge", room.isCreator);
+  badge.classList.toggle("creator-badge", createdHere);
   title.textContent = room.roomName || "Sala LastSeen";
-  meta.textContent = roomMeta(room, history.length);
+  meta.textContent = roomMeta({ ...room, isCreator: createdHere }, history.length);
 
   if (room.active) actions.appendChild(actionLink("Entrar", roomURL(room.roomId), ""));
 
-  if (room.isCreator && room.creatorToken) {
+  if (canManage) {
     actions.appendChild(actionLink(room.active ? "Gestionar" : "Abrir sala", roomURL(room.roomId), "secondary"));
     if (room.active) {
       actions.appendChild(actionButton("+3 h", "secondary", () => updateRoomTTL(room, 180)));
@@ -201,7 +205,9 @@ function renderSavedRoom(room) {
       actions.appendChild(disabledAction("Gestión no disponible: la sala ya no está activa en el servidor."));
     }
   } else {
-    actions.appendChild(disabledAction("Sin permisos de creador en este dispositivo."));
+    actions.appendChild(disabledAction(createdHere
+      ? "Sala creada aquí, pero sin token de creador guardado. Crea una sala nueva con la versión actual o revisa que Railway esté en main."
+      : "Sin permisos de creador en este dispositivo."));
   }
 
   actions.appendChild(actionButton("Revisar historial", "secondary", () => {
@@ -216,7 +222,7 @@ function renderSavedRoom(room) {
 function roomMeta(room, historyCount) {
   const parts = [];
   parts.push(`Código: ${room.roomId}`);
-  parts.push(room.isCreator ? "creada por este dispositivo" : "participante");
+  parts.push((room.isCreator || room.creatorToken) ? "creada por este dispositivo" : "participante");
   if (room.active && room.ttl) parts.push(`queda aprox. ${formatDuration(room.ttl)}`);
   if (room.lastJoinedAt) parts.push(`última entrada: ${formatDate(room.lastJoinedAt)}`);
   else if (room.createdAt) parts.push(`creada: ${formatDate(room.createdAt)}`);
@@ -348,7 +354,7 @@ function newestMember(left, right) {
 }
 
 function saveRoomState(roomID, state) {
-  const normalized = { ...state, membersHistory: dedupeMembersHistory(state.membersHistory || {}) };
+  const normalized = { ...state, isCreator: Boolean(state.isCreator || state.creatorToken), membersHistory: dedupeMembersHistory(state.membersHistory || {}) };
   localStorage.setItem(roomKey(roomID), JSON.stringify(normalized));
   localStorage.setItem("lastseen:last-room", roomID);
   addRoomToIndex(roomID);
