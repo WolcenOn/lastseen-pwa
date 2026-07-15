@@ -160,6 +160,12 @@ func (h *Hub) HandleClientMessage(roomID string, clientID string, msg InboundMes
 		if room.ForceSelfDisconnect(clientID, msg.PIN) {
 			room.Broadcast(OutboundMessage{Type: "leave", Data: map[string]string{"id": clientID}})
 		}
+	case "meet":
+		point := room.SetMeetingPoint(clientID, msg)
+		room.Broadcast(OutboundMessage{Type: "meet", Data: point})
+	case "perimeter":
+		perimeter := room.SetPerimeter(clientID, msg)
+		room.Broadcast(OutboundMessage{Type: "perimeter", Data: perimeter})
 	}
 }
 
