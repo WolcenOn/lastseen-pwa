@@ -7,6 +7,7 @@ const statusEl = document.querySelector("#status");
 
 const ROOM_KEY_PATTERN = /^lastseen:(.+):state$/;
 const ROOM_INDEX_KEY = "lastseen:rooms";
+const DEFAULT_ROOM_TTL_SECONDS = 10800;
 
 if (dashboardEl) {
   createRoomButton?.addEventListener("click", createRoomFromDashboard, { capture: true });
@@ -38,10 +39,11 @@ async function createRoomFromDashboard(event) {
     state.roomName = data.name || state.roomName || "Sala LastSeen";
     state.isCreator = true;
     state.creatorToken = data.creatorToken || state.creatorToken || "";
-    state.ttl = Number(data.ttl || state.ttl || 10800);
+    state.ttl = Number(data.ttl || state.ttl || DEFAULT_ROOM_TTL_SECONDS);
     state.clientId = state.clientId || generateClientID();
     state.createdAt = new Date().toISOString();
     state.lastJoinedAt = state.lastJoinedAt || state.createdAt;
+    state.membersHistory = dedupeMembersHistory(state.membersHistory || {});
 
     saveRoomState(roomID, state);
     await renderRoomDashboard();
@@ -70,9 +72,8 @@ async function renderRoomDashboard() {
   refreshDashboardButton.disabled = true;
   try {
     const enriched = await Promise.all(states.map(enrichRoomState));
-    enriched
-      .sort(sortRoomsForDashboard)
-      .forEach(room => dashboardEl.appendChild(renderSavedRoom(room)));
+    const uniqueRooms = dedupeRooms(enriched).sort(sortRoomsForDashboard);
+    uniqueRooms.forEach(room => dashboardEl.appendChild(renderSavedRoom(room)));
   } finally {
     refreshDashboardButton.disabled = false;
   }
@@ -96,7 +97,7 @@ function readSavedRoomStates() {
 }
 
 function normalizeRoomState(roomID, state) {
-  return {
+  const normalized = {
     roomId: state.roomId || roomID,
     roomName: state.roomName || "Sala LastSeen",
     clientId: state.clientId || "",
@@ -108,12 +109,18 @@ function normalizeRoomState(roomID, state) {
     ttl: Number(state.ttl || 0),
     createdAt: state.createdAt || "",
     lastJoinedAt: state.lastJoinedAt || "",
-    membersHistory: state.membersHistory || {},
+    membersHistory: dedupeMembersHistory(state.membersHistory || {}),
     safety: state.safety || {},
     localOnly: true,
     active: false,
     serverRoom: null
   };
+
+  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length) {
+    saveRoomState(normalized.roomId, normalized);
+  }
+
+  return normalized;
 }
 
 async function enrichRoomState(room) {
@@ -129,7 +136,8 @@ async function enrichRoomState(room) {
       serverRoom,
       roomName: serverRoom.name || room.roomName,
       ttl: Number(serverRoom.ttl || room.ttl || 0),
-      safety: serverRoom.safety || room.safety || {}
+      safety: serverRoom.safety || room.safety || {},
+      membersHistory: dedupeMembersHistory(room.membersHistory || {})
     };
 
     saveRoomState(room.roomId, enriched);
@@ -137,6 +145,19 @@ async function enrichRoomState(room) {
   } catch {
     return room;
   }
+}
+
+function dedupeRooms(rooms) {
+  const byID = new Map();
+  rooms.forEach(room => {
+    const previous = byID.get(room.roomId);
+    if (!previous || roomScore(room) >= roomScore(previous)) byID.set(room.roomId, room);
+  });
+  return [...byID.values()];
+}
+
+function roomScore(room) {
+  return (room.active ? 1000 : 0) + (room.creatorToken ? 100 : 0) + lastActivityTime(room) / 1000000000000;
 }
 
 function sortRoomsForDashboard(left, right) {
@@ -162,23 +183,25 @@ function renderSavedRoom(room) {
   const actions = node.querySelector(".saved-room-actions");
   const members = node.querySelector(".saved-room-members");
 
+  const history = Object.values(dedupeMembersHistory(room.membersHistory || {}));
   badge.textContent = room.active ? "activa" : "historial";
   badge.classList.toggle("offline", !room.active);
   badge.classList.toggle("creator-badge", room.isCreator);
   title.textContent = room.roomName || "Sala LastSeen";
-  meta.textContent = roomMeta(room);
+  meta.textContent = roomMeta(room, history.length);
 
-  if (room.active) {
-    actions.appendChild(actionLink("Entrar en la sala", roomURL(room.roomId), ""));
-  }
+  if (room.active) actions.appendChild(actionLink("Entrar", roomURL(room.roomId), ""));
 
   if (room.isCreator && room.creatorToken) {
-    const manage = actionLink(room.active ? "Gestionar" : "Abrir gestión local", roomURL(room.roomId), "secondary");
-    actions.appendChild(manage);
+    actions.appendChild(actionLink(room.active ? "Gestionar" : "Abrir sala", roomURL(room.roomId), "secondary"));
     if (room.active) {
-      actions.appendChild(actionButton("+ duración", "secondary", () => updateRoomTTL(room, 180)));
+      actions.appendChild(actionButton("+3 h", "secondary", () => updateRoomTTL(room, 180)));
       actions.appendChild(actionButton("Terminar", "danger", () => endRoom(room)));
+    } else {
+      actions.appendChild(disabledAction("Gestión no disponible: la sala ya no está activa en el servidor."));
     }
+  } else {
+    actions.appendChild(disabledAction("Sin permisos de creador en este dispositivo."));
   }
 
   actions.appendChild(actionButton("Revisar historial", "secondary", () => {
@@ -186,19 +209,18 @@ function renderSavedRoom(room) {
     details.open = !details.open;
   }));
 
-  renderHistoryMembers(members, Object.values(room.membersHistory || {}));
+  renderHistoryMembers(members, history);
   return node;
 }
 
-function roomMeta(room) {
+function roomMeta(room, historyCount) {
   const parts = [];
   parts.push(`Código: ${room.roomId}`);
   parts.push(room.isCreator ? "creada por este dispositivo" : "participante");
   if (room.active && room.ttl) parts.push(`queda aprox. ${formatDuration(room.ttl)}`);
   if (room.lastJoinedAt) parts.push(`última entrada: ${formatDate(room.lastJoinedAt)}`);
   else if (room.createdAt) parts.push(`creada: ${formatDate(room.createdAt)}`);
-  const count = Object.keys(room.membersHistory || {}).length;
-  parts.push(`${count} usuario${count === 1 ? "" : "s"} en historial local`);
+  parts.push(`${historyCount} usuario${historyCount === 1 ? "" : "s"} en historial local`);
   return parts.join(" · ");
 }
 
@@ -219,6 +241,13 @@ function actionButton(label, className, onClick) {
   return button;
 }
 
+function disabledAction(message) {
+  const item = document.createElement("p");
+  item.className = "hint disabled-action";
+  item.textContent = message;
+  return item;
+}
+
 async function updateRoomTTL(room, ttlMinutes) {
   if (!room.creatorToken) return;
   try {
@@ -227,7 +256,7 @@ async function updateRoomTTL(room, ttlMinutes) {
       headers: { "Content-Type": "application/json", "X-Creator-Token": room.creatorToken },
       body: JSON.stringify({ ttlMinutes, creatorToken: room.creatorToken })
     });
-    if (!response.ok) throw new Error("No se pudo ampliar la sala.");
+    if (!response.ok) throw new Error("No se pudo ampliar la sala. Revisa que Railway esté desplegado con la última versión.");
     await renderRoomDashboard();
   } catch (error) {
     window.alert(error.message || "Error ampliando la sala.");
@@ -244,7 +273,7 @@ async function endRoom(room) {
       headers: { "Content-Type": "application/json", "X-Creator-Token": room.creatorToken },
       body: JSON.stringify({ creatorToken: room.creatorToken })
     });
-    if (!response.ok) throw new Error("No se pudo terminar la sala.");
+    if (!response.ok) throw new Error("No se pudo terminar la sala. Revisa que Railway esté desplegado con la última versión.");
     await renderRoomDashboard();
   } catch (error) {
     window.alert(error.message || "Error terminando la sala.");
@@ -253,12 +282,13 @@ async function endRoom(room) {
 
 function renderHistoryMembers(target, history) {
   target.innerHTML = "";
-  if (history.length === 0) {
+  const unique = dedupeMembersList(history);
+  if (unique.length === 0) {
     target.innerHTML = `<p class="hint">Sala guardada. Aún no hay miembros en el historial local.</p>`;
     return;
   }
 
-  history
+  unique
     .sort((a, b) => Date.parse(b.seen || b.archivedAt || "") - Date.parse(a.seen || a.archivedAt || ""))
     .slice(0, 8)
     .forEach(member => target.appendChild(renderHistoryMember(member)));
@@ -268,7 +298,7 @@ function renderHistoryMember(member) {
   const row = document.createElement("div");
   row.className = `member ${member.geo ? "geo-alert" : ""}`;
   const coords = hasLatLng(member) ? `${member.lat}, ${member.lng}` : "Sin ubicación GPS guardada";
-  const seen = member.seen ? formatDate(member.seen) : "sin señal";
+  const seen = member.on ? "online ahora" : member.seen ? formatDate(member.seen) : "sin señal";
   const battery = member.bat ? ` · batería ${Math.round(member.bat * 100)}%` : "";
   row.innerHTML = `
     <div class="avatar" aria-hidden="true">${escapeHTML(member.avatar || "•")}</div>
@@ -281,8 +311,45 @@ function renderHistoryMember(member) {
   return row;
 }
 
+function dedupeMembersHistory(history) {
+  const unique = new Map();
+  Object.values(history || {}).forEach(member => {
+    if (!member) return;
+    const key = memberLogicalKey(member);
+    const previous = unique.get(key);
+    unique.set(key, newestMember(previous, member));
+  });
+
+  const result = {};
+  unique.forEach(member => {
+    const key = member.id || memberLogicalKey(member);
+    result[key] = member;
+  });
+  return result;
+}
+
+function dedupeMembersList(list) {
+  return Object.values(dedupeMembersHistory(Object.fromEntries(
+    list.filter(Boolean).map((member, index) => [member.id || `${memberLogicalKey(member)}:${index}`, member])
+  )));
+}
+
+function memberLogicalKey(member) {
+  const nick = String(member.nick || member.nickname || "").trim().toLowerCase();
+  const avatar = String(member.avatar || "").trim();
+  return nick || avatar ? `${nick}|${avatar}` : String(member.id || crypto.randomUUID());
+}
+
+function newestMember(left, right) {
+  if (!left) return right;
+  const leftTime = Date.parse(left.seen || left.archivedAt || "") || 0;
+  const rightTime = Date.parse(right.seen || right.archivedAt || "") || 0;
+  return rightTime >= leftTime ? { ...left, ...right } : { ...right, ...left };
+}
+
 function saveRoomState(roomID, state) {
-  localStorage.setItem(roomKey(roomID), JSON.stringify(state));
+  const normalized = { ...state, membersHistory: dedupeMembersHistory(state.membersHistory || {}) };
+  localStorage.setItem(roomKey(roomID), JSON.stringify(normalized));
   localStorage.setItem("lastseen:last-room", roomID);
   addRoomToIndex(roomID);
 }
