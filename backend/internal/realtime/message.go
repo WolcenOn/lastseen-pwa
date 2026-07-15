@@ -2,6 +2,11 @@ package realtime
 
 import "time"
 
+const (
+	MinPerimeterRadiusMeters = 50
+	MaxPerimeterRadiusMeters = 5000
+)
+
 // InboundMessage is intentionally compact to reduce payload size on saturated mobile networks.
 type InboundMessage struct {
 	Type string `json:"t"`
@@ -12,6 +17,7 @@ type InboundMessage struct {
 	BatteryLevel float64 `json:"bat,omitempty"`
 	TargetID     string  `json:"target,omitempty"`
 	PIN          string  `json:"pin,omitempty"`
+	RadiusMeters int     `json:"radius,omitempty"`
 }
 
 func (m InboundMessage) Valid() bool {
@@ -26,6 +32,10 @@ func (m InboundMessage) Valid() bool {
 		return validLatLng(m.Lat, m.Lng)
 	case "disconnect":
 		return m.PIN != ""
+	case "meet":
+		return validLatLng(m.Lat, m.Lng)
+	case "perimeter":
+		return validLatLng(m.Lat, m.Lng) && m.RadiusMeters >= MinPerimeterRadiusMeters && m.RadiusMeters <= MaxPerimeterRadiusMeters
 	default:
 		return false
 	}
@@ -37,16 +47,38 @@ type OutboundMessage struct {
 }
 
 type PublicRoom struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresIn int64     `json:"expiresIn"`
-	MaxFree   int       `json:"maxFree"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	CreatedAt time.Time      `json:"createdAt"`
+	ExpiresIn int64          `json:"expiresIn"`
+	MaxFree   int            `json:"maxFree"`
+	Safety    PublicSafety   `json:"safety"`
+}
+
+type PublicSafety struct {
+	MeetingPoint *PublicMeetingPoint `json:"meetingPoint,omitempty"`
+	Perimeter    *PublicPerimeter    `json:"perimeter,omitempty"`
+}
+
+type PublicMeetingPoint struct {
+	Lat       float64   `json:"lat"`
+	Lng       float64   `json:"lng"`
+	SetBy     string    `json:"setBy,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type PublicPerimeter struct {
+	Lat          float64   `json:"lat"`
+	Lng          float64   `json:"lng"`
+	RadiusMeters int       `json:"radius"`
+	SetBy        string    `json:"setBy,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type RoomSnapshot struct {
 	Room    PublicRoom     `json:"room"`
 	Clients []PublicClient `json:"clients"`
+	Safety  PublicSafety   `json:"safety"`
 }
 
 type PublicClient struct {

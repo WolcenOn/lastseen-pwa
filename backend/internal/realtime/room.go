@@ -24,6 +24,7 @@ type Room struct {
 	LastActivityAt time.Time
 
 	clients map[string]*Client
+	safety  PublicSafety
 }
 
 func NewRoom(config RoomConfig) *Room {
@@ -55,6 +56,7 @@ func (r *Room) Public(now time.Time) PublicRoom {
 		CreatedAt: r.CreatedAt,
 		ExpiresIn: int64(remaining.Seconds()),
 		MaxFree:   r.MaxFreeClients,
+		Safety:    cloneSafety(r.safety),
 	}
 }
 
@@ -128,7 +130,7 @@ func (r *Room) UpdateLocation(clientID string, msg InboundMessage) {
 	client.Lat = msg.Lat
 	client.Lng = msg.Lng
 	client.BatteryLevel = msg.BatteryLevel
-	client.GeofenceAlert = false
+	client.GeofenceAlert = r.isOutsidePerimeterLocked(msg.Lat, msg.Lng)
 	client.LastSeen = time.Now().UTC()
 	client.Connected = true
 
@@ -151,6 +153,7 @@ func (r *Room) MarkSOS(clientID string, msg InboundMessage) {
 	client.Lat = msg.Lat
 	client.Lng = msg.Lng
 	client.BatteryLevel = msg.BatteryLevel
+	client.GeofenceAlert = r.isOutsidePerimeterLocked(msg.Lat, msg.Lng)
 	client.SOS = true
 	client.LastSeen = time.Now().UTC()
 
@@ -159,6 +162,41 @@ func (r *Room) MarkSOS(clientID string, msg InboundMessage) {
 	r.mu.Unlock()
 
 	r.Broadcast(OutboundMessage{Type: "sos", Data: public})
+}
+
+func (r *Room) SetMeetingPoint(clientID string, msg InboundMessage) PublicMeetingPoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	point := PublicMeetingPoint{
+		Lat:       msg.Lat,
+		Lng:       msg.Lng,
+		SetBy:     clientID,
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	r.safety.MeetingPoint = &point
+	r.touchLocked()
+
+	return point
+}
+
+func (r *Room) SetPerimeter(clientID string, msg InboundMessage) PublicPerimeter {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	perimeter := PublicPerimeter{
+		Lat:          msg.Lat,
+		Lng:          msg.Lng,
+		RadiusMeters: msg.RadiusMeters,
+		SetBy:        clientID,
+		UpdatedAt:    time.Now().UTC(),
+	}
+
+	r.safety.Perimeter = &perimeter
+	r.touchLocked()
+
+	return perimeter
 }
 
 func (r *Room) SendSnapshot(client *Client) {
@@ -179,6 +217,8 @@ func (r *Room) Snapshot() RoomSnapshot {
 		remaining = 0
 	}
 
+	safety := cloneSafety(r.safety)
+
 	return RoomSnapshot{
 		Room: PublicRoom{
 			ID:        r.ID,
@@ -186,8 +226,10 @@ func (r *Room) Snapshot() RoomSnapshot {
 			CreatedAt: r.CreatedAt,
 			ExpiresIn: int64(remaining.Seconds()),
 			MaxFree:   r.MaxFreeClients,
+			Safety:    safety,
 		},
 		Clients: clients,
+		Safety:  safety,
 	}
 }
 
@@ -244,6 +286,31 @@ func (r *Room) Close() {
 
 func (r *Room) touchLocked() {
 	r.LastActivityAt = time.Now().UTC()
+}
+
+func (r *Room) isOutsidePerimeterLocked(lat float64, lng float64) bool {
+	if r.safety.Perimeter == nil {
+		return false
+	}
+
+	distance := haversineMeters(lat, lng, r.safety.Perimeter.Lat, r.safety.Perimeter.Lng)
+	return distance > float64(r.safety.Perimeter.RadiusMeters)
+}
+
+func cloneSafety(value PublicSafety) PublicSafety {
+	var safety PublicSafety
+
+	if value.MeetingPoint != nil {
+		meeting := *value.MeetingPoint
+		safety.MeetingPoint = &meeting
+	}
+
+	if value.Perimeter != nil {
+		perimeter := *value.Perimeter
+		safety.Perimeter = &perimeter
+	}
+
+	return safety
 }
 
 func (c *Client) toPublicLocked() PublicClient {

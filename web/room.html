@@ -7,6 +7,12 @@
     <title>Sala | LastSeen</title>
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./assets/icons/icon.svg" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
     <link rel="stylesheet" href="./assets/css/app.css" />
   </head>
   <body>
@@ -42,11 +48,52 @@
           <button id="share-link" class="secondary" type="button">Compartir</button>
         </div>
         <p id="room-status" class="status" aria-live="polite"></p>
+
+        <section class="map-panel" aria-label="Mapa de la sala">
+          <div id="map" class="map" role="application" aria-label="Mapa con miembros de la sala"></div>
+          <div class="map-actions">
+            <button id="fit-map" class="secondary" type="button">Ver grupo</button>
+            <button id="set-meeting-here" class="secondary" type="button">Punto aquí</button>
+            <button id="set-meeting-map" class="secondary" type="button">Punto en mapa</button>
+          </div>
+          <p id="map-help" class="hint">Los avatares muestran la última ubicación recibida. El punto de encuentro se comparte con toda la sala.</p>
+        </section>
+
+        <details class="safety-panel">
+          <summary>Opciones de seguridad <span class="premium-pill">premium-ready</span></summary>
+          <div class="safety-grid">
+            <label for="perimeter-radius">Perímetro</label>
+            <select id="perimeter-radius">
+              <option value="100">100 m</option>
+              <option value="250" selected>250 m</option>
+              <option value="500">500 m</option>
+              <option value="1000">1 km</option>
+            </select>
+            <button id="set-perimeter-map" class="secondary" type="button">Dibujar perímetro</button>
+          </div>
+          <div class="safety-grid">
+            <label for="inactivity-minutes">Alerta de inactividad local</label>
+            <select id="inactivity-minutes">
+              <option value="3">3 min</option>
+              <option value="5" selected>5 min</option>
+              <option value="10">10 min</option>
+              <option value="15">15 min</option>
+            </select>
+            <button id="check-inactivity" class="secondary" type="button">Revisar ahora</button>
+          </div>
+          <p id="safety-status" class="hint">Base premium: perímetro, inactividad, pánico y rescate quedan preparados sin guardar datos persistentes.</p>
+        </details>
+
         <div id="members" class="member-list"></div>
         <button id="leave-room" class="danger" type="button">Salir</button>
       </section>
     </main>
 
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
     <script src="./config.js"></script>
     <script type="module" src="./src/app.js"></script>
   </body>
