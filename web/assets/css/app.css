@@ -172,14 +172,18 @@ button.danger, .button-like.danger { background: #fb7185; color: #450a0a; }
 .map-fallback { display: grid; place-items: center; height: 100%; padding: 24px; color: #bae6fd; text-align: center; }
 .map-unavailable .map { border-color: rgba(251, 113, 133, 0.48); }
 .leaflet-container { width: 100%; height: 100%; background: #020617; color: #0f172a; }
+.leaflet-marker-icon { overflow: visible !important; }
+.leaflet-marker-icon.member-marker-hidden { display: none !important; }
 
 .member-marker {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  width: auto;
+  justify-content: flex-start;
+  gap: 5px;
+  width: max-content;
   min-width: 40px;
   height: 40px;
+  padding-right: 10px;
   border: 3px solid #38bdf8;
   border-radius: 999px;
   background: #0f172a;
@@ -187,11 +191,11 @@ button.danger, .button-like.danger { background: #fb7185; color: #450a0a; }
   color: #f8fafc;
   font-size: 1.25rem;
   white-space: nowrap;
+  transform: translateX(-20px);
 }
-.member-marker-avatar { display: grid; place-items: center; width: 34px; height: 34px; }
+.member-marker-avatar { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 34px; }
 .member-marker-label {
-  max-width: 88px;
-  padding-right: 10px;
+  max-width: 96px;
   overflow: hidden;
   color: #e0f2fe;
   font-size: 0.72rem;
