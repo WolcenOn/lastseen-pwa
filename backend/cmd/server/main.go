@@ -28,7 +28,7 @@ const (
 	defaultMaxFree    = 3
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
-	backendVersion    = "2026-07-16-creator-token-health"
+	backendVersion    = "2026-07-16-railway-cache-bust"
 )
 
 var (
@@ -96,7 +96,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("lastseen server listening on %s", addr)
+		log.Printf("lastseen server listening on %s version=%s", addr, backendVersion)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
@@ -119,7 +119,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"version": backendVersion,
 		"features": map[string]bool{
-			"creatorToken":      true,
+			"creatorToken":        true,
 			"participantSnapshot": true,
 		},
 	})
@@ -292,10 +292,7 @@ func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err
 func resolveAddr() string {
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port != "" {
-		if strings.HasPrefix(port, ":") {
-			return port
-		}
-		return ":" + port
+		return ":" + strings.TrimPrefix(port, ":")
 	}
 	return env("ADDR", defaultAddr)
 }
@@ -385,6 +382,7 @@ func randomURLSafe(size int) (string, error) {
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-LastSeen-Version", backendVersion)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
