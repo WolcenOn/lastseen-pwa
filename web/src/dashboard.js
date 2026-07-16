@@ -1,3 +1,5 @@
+import { roomStore } from "./room-store.js";
+
 const dashboardEl = document.querySelector("#room-dashboard");
 const refreshDashboardButton = document.querySelector("#refresh-room-dashboard");
 const roomCardTemplate = document.querySelector("#room-card-template");
@@ -6,7 +8,6 @@ const roomNameInput = document.querySelector("#room-name-input");
 const statusEl = document.querySelector("#status");
 
 const ROOM_KEY_PATTERN = /^lastseen:(.+):state$/;
-const ROOM_INDEX_KEY = "lastseen:rooms";
 const DEFAULT_ROOM_TTL_SECONDS = 10800;
 
 if (dashboardEl) {
@@ -44,23 +45,22 @@ async function createRoomFromDashboard(event) {
       throw new Error(`Railway ha creado la sala, pero no ha devuelto creatorToken. Backend: ${health.summary}. Campos recibidos: ${Object.keys(data || {}).join(", ") || "ninguno"}.`);
     }
 
-    persistCreatorTokenBackup(roomID, creatorToken);
+    roomStore.persistCreatorTokenBackup(roomID, creatorToken);
+    const state = roomStore.loadRoomState(roomID);
+    roomStore.saveRoomState(roomID, {
+      ...state,
+      roomId: roomID,
+      roomName: data.name || state.roomName || "Sala LastSeen",
+      isCreator: true,
+      creatorToken,
+      ttl: Number(data.ttl || state.ttl || DEFAULT_ROOM_TTL_SECONDS),
+      clientId: state.clientId || generateClientID(),
+      createdAt: state.createdAt || new Date().toISOString(),
+      lastJoinedAt: state.lastJoinedAt || new Date().toISOString(),
+      membersHistory: state.membersHistory || {}
+    });
 
-    const previousState = readJSON(roomKey(roomID)) || {};
-    const state = normalizeRoomState(roomID, previousState);
-    state.roomId = roomID;
-    state.roomName = data.name || state.roomName || "Sala LastSeen";
-    state.isCreator = true;
-    state.creatorToken = creatorToken;
-    state.ttl = Number(data.ttl || state.ttl || DEFAULT_ROOM_TTL_SECONDS);
-    state.clientId = state.clientId || generateClientID();
-    state.createdAt = new Date().toISOString();
-    state.lastJoinedAt = state.lastJoinedAt || state.createdAt;
-    state.membersHistory = dedupeMembersHistory(state.membersHistory || {});
-
-    saveRoomState(roomID, state);
     await renderRoomDashboard();
-
     window.location.href = roomURL(roomID);
   } catch (error) {
     createRoomButton.disabled = false;
@@ -71,14 +71,11 @@ async function createRoomFromDashboard(event) {
 async function readBackendHealth() {
   try {
     const response = await fetch(apiURL("/api/health"), { cache: "no-store" });
-    if (!response.ok) {
-      return { supportsCreatorToken: false, summary: `HTTP ${response.status}` };
-    }
+    if (!response.ok) return { supportsCreatorToken: false, summary: `HTTP ${response.status}` };
 
     const data = await response.json();
-    const supportsCreatorToken = Boolean(data?.features?.creatorToken);
     return {
-      supportsCreatorToken,
+      supportsCreatorToken: Boolean(data?.features?.creatorToken),
       summary: JSON.stringify(data)
     };
   } catch (error) {
@@ -106,15 +103,16 @@ async function renderRoomDashboard() {
   refreshDashboardButton.disabled = true;
   try {
     const enriched = await Promise.all(states.map(enrichRoomState));
-    const uniqueRooms = dedupeRooms(enriched).sort(sortRoomsForDashboard);
-    uniqueRooms.forEach(room => dashboardEl.appendChild(renderSavedRoom(room)));
+    dedupeRooms(enriched)
+      .sort(sortRoomsForDashboard)
+      .forEach(room => dashboardEl.appendChild(renderSavedRoom(room)));
   } finally {
     refreshDashboardButton.disabled = false;
   }
 }
 
 function readSavedRoomStates() {
-  const roomIDs = new Set(readRoomIndex());
+  const roomIDs = new Set(roomStore.readRoomIndex());
 
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
@@ -123,41 +121,11 @@ function readSavedRoomStates() {
   }
 
   const rooms = [...roomIDs]
-    .map(roomID => normalizeRoomState(roomID, readJSON(roomKey(roomID)) || {}))
+    .map(roomID => roomStore.loadRoomState(roomID))
     .filter(room => room.roomId);
 
-  saveRoomIndex(rooms.map(room => room.roomId));
+  roomStore.saveRoomIndex(rooms.map(room => room.roomId));
   return rooms;
-}
-
-function normalizeRoomState(roomID, state) {
-  const creatorToken = state.creatorToken || readCreatorTokenBackup(roomID);
-  const normalized = {
-    roomId: state.roomId || roomID,
-    roomName: state.roomName || "Sala LastSeen",
-    clientId: state.clientId || "",
-    nickname: state.nickname || "",
-    avatar: state.avatar || "",
-    pin: state.pin || "",
-    isCreator: Boolean(state.isCreator || creatorToken),
-    creatorToken,
-    ttl: Number(state.ttl || 0),
-    createdAt: state.createdAt || "",
-    lastJoinedAt: state.lastJoinedAt || "",
-    membersHistory: dedupeMembersHistory(state.membersHistory || {}),
-    safety: state.safety || {},
-    localOnly: true,
-    active: false,
-    serverRoom: null
-  };
-
-  if (creatorToken) persistCreatorTokenBackup(roomID, creatorToken);
-
-  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length || normalized.isCreator !== Boolean(state.isCreator) || normalized.creatorToken !== state.creatorToken) {
-    saveRoomState(normalized.roomId, normalized);
-  }
-
-  return normalized;
 }
 
 async function enrichRoomState(room) {
@@ -166,20 +134,15 @@ async function enrichRoomState(room) {
     if (!response.ok) return room;
 
     const serverRoom = await response.json();
-    const enriched = {
+    return roomStore.saveRoomState(room.roomId, {
       ...room,
-      isCreator: Boolean(room.isCreator || room.creatorToken),
       active: true,
       localOnly: false,
       serverRoom,
       roomName: serverRoom.name || room.roomName,
       ttl: Number(serverRoom.ttl || room.ttl || 0),
-      safety: serverRoom.safety || room.safety || {},
-      membersHistory: dedupeMembersHistory(room.membersHistory || {})
-    };
-
-    saveRoomState(room.roomId, enriched);
-    return enriched;
+      safety: serverRoom.safety || room.safety || {}
+    });
   } catch {
     return room;
   }
@@ -208,9 +171,10 @@ function lastActivityTime(room) {
   const historyTimes = Object.values(room.membersHistory || {})
     .map(member => Date.parse(member.archivedAt || member.seen || ""))
     .filter(Number.isFinite);
+  const ended = Date.parse(room.endedAt || "");
   const joined = Date.parse(room.lastJoinedAt || "");
   const created = Date.parse(room.createdAt || "");
-  return Math.max(joined || 0, created || 0, ...historyTimes, 0);
+  return Math.max(ended || 0, joined || 0, created || 0, ...historyTimes, 0);
 }
 
 function renderSavedRoom(room) {
@@ -221,11 +185,11 @@ function renderSavedRoom(room) {
   const actions = node.querySelector(".saved-room-actions");
   const members = node.querySelector(".saved-room-members");
 
-  const history = Object.values(dedupeMembersHistory(room.membersHistory || {}));
+  const history = Object.values(roomStore.normalizeMembersHistory(room.membersHistory || {}));
   const canManage = Boolean(room.creatorToken);
   const createdHere = Boolean(room.isCreator || room.creatorToken);
 
-  badge.textContent = room.active ? "activa" : "historial";
+  badge.textContent = room.active ? "activa" : room.endedAt ? "cerrada" : "historial";
   badge.classList.toggle("offline", !room.active);
   badge.classList.toggle("creator-badge", createdHere);
   title.textContent = room.roomName || "Sala LastSeen";
@@ -261,7 +225,8 @@ function roomMeta(room, historyCount) {
   parts.push(`Código: ${room.roomId}`);
   parts.push((room.isCreator || room.creatorToken) ? "creada por este dispositivo" : "participante");
   if (room.active && room.ttl) parts.push(`queda aprox. ${formatDuration(room.ttl)}`);
-  if (room.lastJoinedAt) parts.push(`última entrada: ${formatDate(room.lastJoinedAt)}`);
+  if (room.endedAt) parts.push(`terminada: ${formatDate(room.endedAt)}`);
+  else if (room.lastJoinedAt) parts.push(`última entrada: ${formatDate(room.lastJoinedAt)}`);
   else if (room.createdAt) parts.push(`creada: ${formatDate(room.createdAt)}`);
   parts.push(`${historyCount} usuario${historyCount === 1 ? "" : "s"} en historial local`);
   return parts.join(" · ");
@@ -297,9 +262,9 @@ async function updateRoomTTL(room, ttlMinutes) {
     const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(room.roomId)}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json", "X-Creator-Token": room.creatorToken },
-      body: JSON.stringify({ ttlMinutes, creatorToken: room.creatorToken })
+      body: JSON.stringify({ ttlMinutes })
     });
-    if (!response.ok) throw new Error("No se pudo ampliar la sala. Revisa que Railway esté desplegado con la última versión.");
+    if (!response.ok) throw new Error(await readError(response, "No se pudo ampliar la sala. Revisa que Railway esté desplegado con la última versión."));
     await renderRoomDashboard();
   } catch (error) {
     window.alert(error.message || "Error ampliando la sala.");
@@ -313,34 +278,45 @@ async function endRoom(room) {
   try {
     const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(room.roomId)}`), {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", "X-Creator-Token": room.creatorToken },
-      body: JSON.stringify({ creatorToken: room.creatorToken })
+      headers: { "Content-Type": "application/json", "X-Creator-Token": room.creatorToken }
     });
-    if (!response.ok) throw new Error("No se pudo terminar la sala. Revisa que Railway esté desplegado con la última versión.");
+    if (!response.ok) throw new Error(await readError(response, "No se pudo terminar la sala. Revisa que Railway esté desplegado con la última versión."));
+
+    roomStore.saveRoomState(room.roomId, {
+      ...room,
+      active: false,
+      endedAt: new Date().toISOString()
+    });
     await renderRoomDashboard();
   } catch (error) {
     window.alert(error.message || "Error terminando la sala.");
   }
 }
 
+async function readError(response, fallback) {
+  try {
+    const text = await response.text();
+    return text ? `${fallback} (${response.status}: ${text.trim()})` : `${fallback} (${response.status})`;
+  } catch {
+    return `${fallback} (${response.status})`;
+  }
+}
+
 function renderHistoryMembers(target, history) {
   target.innerHTML = "";
-  const unique = dedupeMembersList(history);
+  const unique = roomStore.normalizeMembers(history);
   if (unique.length === 0) {
     target.innerHTML = `<p class="hint">Sala guardada. Aún no hay miembros en el historial local.</p>`;
     return;
   }
 
-  unique
-    .sort((a, b) => Date.parse(b.seen || b.archivedAt || "") - Date.parse(a.seen || a.archivedAt || ""))
-    .slice(0, 8)
-    .forEach(member => target.appendChild(renderHistoryMember(member)));
+  unique.slice(0, 8).forEach(member => target.appendChild(renderHistoryMember(member)));
 }
 
 function renderHistoryMember(member) {
   const row = document.createElement("div");
   row.className = `member ${member.geo ? "geo-alert" : ""}`;
-  const coords = hasLatLng(member) ? `${member.lat}, ${member.lng}` : "Sin ubicación GPS guardada";
+  const coords = roomStore.hasLatLng(member) ? `${member.lat}, ${member.lng}` : "Sin ubicación GPS guardada";
   const seen = member.on ? "online ahora" : member.seen ? formatDate(member.seen) : "sin señal";
   const battery = member.bat ? ` · batería ${Math.round(member.bat * 100)}%` : "";
   row.innerHTML = `
@@ -352,91 +328,6 @@ function renderHistoryMember(member) {
     <span class="badge ${member.on ? "" : "offline"}">${member.on ? "online" : "last seen"}</span>
   `;
   return row;
-}
-
-function dedupeMembersHistory(history) {
-  const unique = new Map();
-  Object.values(history || {}).forEach(member => {
-    if (!member) return;
-    const key = memberLogicalKey(member);
-    const previous = unique.get(key);
-    unique.set(key, newestMember(previous, member));
-  });
-
-  const result = {};
-  unique.forEach(member => {
-    const key = member.id || memberLogicalKey(member);
-    result[key] = member;
-  });
-  return result;
-}
-
-function dedupeMembersList(list) {
-  return Object.values(dedupeMembersHistory(Object.fromEntries(
-    list.filter(Boolean).map((member, index) => [member.id || `${memberLogicalKey(member)}:${index}`, member])
-  )));
-}
-
-function memberLogicalKey(member) {
-  const nick = String(member.nick || member.nickname || "").trim().toLowerCase();
-  const avatar = String(member.avatar || "").trim();
-  return nick || avatar ? `${nick}|${avatar}` : String(member.id || crypto.randomUUID());
-}
-
-function newestMember(left, right) {
-  if (!left) return right;
-  const leftTime = Date.parse(left.seen || left.archivedAt || "") || 0;
-  const rightTime = Date.parse(right.seen || right.archivedAt || "") || 0;
-  return rightTime >= leftTime ? { ...left, ...right } : { ...right, ...left };
-}
-
-function saveRoomState(roomID, state) {
-  const normalized = { ...state, isCreator: Boolean(state.isCreator || state.creatorToken), membersHistory: dedupeMembersHistory(state.membersHistory || {}) };
-  if (normalized.creatorToken) persistCreatorTokenBackup(roomID, normalized.creatorToken);
-  localStorage.setItem(roomKey(roomID), JSON.stringify(normalized));
-  localStorage.setItem("lastseen:last-room", roomID);
-  addRoomToIndex(roomID);
-}
-
-function readRoomIndex() {
-  const value = readJSON(ROOM_INDEX_KEY);
-  return Array.isArray(value) ? value.filter(Boolean) : [];
-}
-
-function saveRoomIndex(roomIDs) {
-  localStorage.setItem(ROOM_INDEX_KEY, JSON.stringify([...new Set(roomIDs.filter(Boolean))]));
-}
-
-function addRoomToIndex(roomID) {
-  saveRoomIndex([roomID, ...readRoomIndex()]);
-}
-
-function roomKey(roomID) {
-  return `lastseen:${roomID}:state`;
-}
-
-function creatorTokenKey(roomID) {
-  return `lastseen:${roomID}:creator-token`;
-}
-
-function persistCreatorTokenBackup(roomID, token) {
-  const clean = String(token || "").trim();
-  if (!roomID || !clean) return;
-  localStorage.setItem(creatorTokenKey(roomID), clean);
-  try {
-    sessionStorage.setItem(creatorTokenKey(roomID), clean);
-  } catch {
-    // sessionStorage may be unavailable in some privacy modes.
-  }
-}
-
-function readCreatorTokenBackup(roomID) {
-  if (!roomID) return "";
-  try {
-    return localStorage.getItem(creatorTokenKey(roomID)) || sessionStorage.getItem(creatorTokenKey(roomID)) || "";
-  } catch {
-    return localStorage.getItem(creatorTokenKey(roomID)) || "";
-  }
 }
 
 function apiBaseURL() {
@@ -465,10 +356,6 @@ function generateClientID() {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function hasLatLng(value) {
-  return typeof value?.lat === "number" && typeof value?.lng === "number" && !(value.lat === 0 && value.lng === 0);
-}
-
 function formatDuration(seconds) {
   const minutes = Math.max(1, Math.round(Number(seconds) / 60));
   if (minutes < 60) return `${minutes} min`;
@@ -482,14 +369,6 @@ function formatDate(value) {
 
 function setStatus(message) {
   if (statusEl) statusEl.textContent = message;
-}
-
-function readJSON(key) {
-  try {
-    return JSON.parse(localStorage.getItem(key));
-  } catch {
-    return null;
-  }
 }
 
 function escapeHTML(value) {
