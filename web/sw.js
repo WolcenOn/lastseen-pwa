@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v18";
+const CACHE_VERSION = "lastseen-v19";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -67,4 +67,4 @@ self.addEventListener("fetch", event => {
         });
     })
   );
-});
+}
