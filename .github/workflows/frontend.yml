@@ -33,5 +33,8 @@ jobs:
       - name: Run room store tests
         run: node ./src/room-store.test.mjs
 
+      - name: Run dashboard smoke test
+        run: node ./src/dashboard.test.mjs
+
       - name: Run websocket client tests
         run: node ./src/websocket-client.test.mjs
