@@ -58,18 +58,6 @@ class FakeWebSocket extends FakeEventTarget {
   }
 }
 
-function installCustomEventShim() {
-  if (globalThis.CustomEvent) return;
-  globalThis.CustomEvent = class CustomEvent extends Event {
-    constructor(type, options = {}) {
-      super(type);
-      this.detail = options.detail;
-    }
-  };
-}
-
-installCustomEventShim();
-
 const noJitterBackoff = createReconnectBackoff({ initial: 1000, factor: 2, max: 5000, jitter: 0 });
 assert.equal(noJitterBackoff(0), 1000);
 assert.equal(noJitterBackoff(1), 2000);
