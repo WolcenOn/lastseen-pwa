@@ -28,6 +28,7 @@ const (
 	defaultMaxFree    = 3
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
+	backendVersion    = "2026-07-16-creator-token-health"
 )
 
 var (
@@ -114,7 +115,14 @@ func main() {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"version": backendVersion,
+		"features": map[string]bool{
+			"creatorToken":      true,
+			"participantSnapshot": true,
+		},
+	})
 }
 
 func createRoomHandler(hub *realtime.Hub) http.HandlerFunc {
@@ -284,6 +292,9 @@ func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err
 func resolveAddr() string {
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port != "" {
+		if strings.HasPrefix(port, ":") {
+			return port
+		}
 		return ":" + port
 	}
 	return env("ADDR", defaultAddr)
@@ -376,73 +387,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && isAllowedOrigin(origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Creator-Token")
-			w.Header().Add("Vary", "Origin")
-		}
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func isAllowedOrigin(origin string) bool {
-	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
-	if origin == "" {
-		return false
-	}
-
-	if strings.HasPrefix(origin, "http://localhost") ||
-		strings.HasPrefix(origin, "https://localhost") ||
-		strings.HasPrefix(origin, "http://127.0.0.1") {
-		return true
-	}
-
-	for _, allowed := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
-		allowed = strings.TrimRight(strings.TrimSpace(allowed), "/")
-		if allowed != "" && origin == allowed {
-			return true
-		}
-	}
-
-	return false
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Permissions-Policy", "geolocation=(self), camera=(), microphone=(), payment=()")
-		next.ServeHTTP(w, r)
-	})
-}
-
-func spaFileServer(staticDir string) http.HandlerFunc {
-	fs := http.FileServer(http.Dir(staticDir))
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			fs.ServeHTTP(w, r)
-			return
-		}
-
-		if strings.HasPrefix(r.URL.Path, "/room/") {
-			http.ServeFile(w, r, filepath.Join(staticDir, "room.html"))
-			return
-		}
-
-		http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
-	}
 }
