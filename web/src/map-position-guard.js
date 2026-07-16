@@ -5,7 +5,7 @@ let localPosition = null;
 installLeafletMapCapture();
 installGeolocationCapture();
 installWebSocketDiagnostics();
-installRoomEndGuard();
+installRoomEndHandler();
 
 function installLeafletMapCapture() {
   if (!window.L || typeof window.L.map !== "function") return;
@@ -55,24 +55,28 @@ function installWebSocketDiagnostics() {
 
   function PatchedWebSocket(url, protocols) {
     const socket = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
-    socket.addEventListener("open", () => {
-      window.__lastSeenSocketOpen = true;
-      window.__lastSeenExpectedSocketClose = false;
-    });
-    socket.addEventListener("message", () => {
-      window.__lastSeenSocketOpen = true;
+    socket.addEventListener("message", event => {
+      const msg = safeJSON(event.data);
+      if (msg?.t !== "error") return;
+
+      const code = msg.d?.code || "join_failed";
+      const status = document.querySelector("#room-status") || document.querySelector("#status");
+      if (code === "nickname_taken") {
+        if (status) status.textContent = msg.d?.message || "Ese mote ya está en uso. Elige otro.";
+        showJoinCardAgain();
+        return;
+      }
+      if (status) status.textContent = msg.d?.message || "No se pudo entrar en la sala.";
     });
     socket.addEventListener("close", event => {
-      window.__lastSeenSocketOpen = false;
-      if (window.__lastSeenExpectedSocketClose || event.code === 1000) return;
-
+      if (window.__lastSeenExpectedSocketClose || window.__lastSeenRoomEnding) return;
       const status = document.querySelector("#room-status") || document.querySelector("#status");
       if (!status) return;
       const suffix = event.code ? ` Código WS: ${event.code}${event.reason ? ` · ${event.reason}` : ""}.` : "";
       status.textContent = `Desconectado del servidor.${suffix}`;
     });
     socket.addEventListener("error", () => {
-      if (window.__lastSeenExpectedSocketClose) return;
+      if (window.__lastSeenExpectedSocketClose || window.__lastSeenRoomEnding) return;
       const status = document.querySelector("#room-status") || document.querySelector("#status");
       if (status) status.textContent = "Error de conexión WebSocket. Revisa permisos de origen o cobertura.";
     });
@@ -88,59 +92,53 @@ function installWebSocketDiagnostics() {
   window.WebSocket = PatchedWebSocket;
 }
 
-function installRoomEndGuard() {
-  const wire = () => {
-    const button = document.querySelector("#end-room");
-    if (!button || button.__lastSeenEndGuard) return;
-    button.__lastSeenEndGuard = true;
+function installRoomEndHandler() {
+  document.addEventListener("click", async event => {
+    const button = event.target?.closest?.("#end-room");
+    if (!button) return;
 
-    button.addEventListener("click", async event => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+    event.preventDefault();
+    event.stopImmediatePropagation();
 
-      const roomID = getRoomID();
-      const state = readRoomState();
-      const token = String(state.creatorToken || localStorage.getItem(creatorTokenKey(roomID)) || "").trim();
-      const status = document.querySelector("#creator-status") || document.querySelector("#room-status") || document.querySelector("#status");
+    if (!window.confirm("¿Terminar esta sala para todos?")) return;
 
-      if (!token) {
-        if (status) status.textContent = "No hay token de creador guardado en este dispositivo.";
-        return;
+    const roomID = getRoomID();
+    const state = readRoomState();
+    const token = state.creatorToken || readCreatorTokenBackup(roomID);
+    const status = document.querySelector("#creator-status") || document.querySelector("#room-status");
+
+    if (!token) {
+      if (status) status.textContent = "Este dispositivo no tiene token de creador.";
+      return;
+    }
+
+    button.disabled = true;
+    window.__lastSeenRoomEnding = true;
+    window.__lastSeenExpectedSocketClose = true;
+    if (status) status.textContent = "Terminando sala…";
+
+    try {
+      const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(roomID)}`), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "X-Creator-Token": token }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`No se pudo terminar la sala (${response.status}). ${text}`.trim());
       }
-      if (!window.confirm("¿Terminar esta sala para todos?")) return;
 
-      button.disabled = true;
-      if (status) status.textContent = "Terminando sala…";
-
-      try {
-        const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(roomID)}`), {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json", "X-Creator-Token": token },
-          body: JSON.stringify({ creatorToken: token })
-        });
-        if (!response.ok) {
-          const body = await response.text().catch(() => "");
-          throw new Error(`No se pudo terminar la sala (${response.status}). ${body || "Revisa Railway/backend."}`);
-        }
-
-        const nextState = { ...state, endedAt: new Date().toISOString(), active: false };
-        localStorage.setItem(roomKey(roomID), JSON.stringify(nextState));
-        window.__lastSeenExpectedSocketClose = true;
-        if (status) status.textContent = "Sala terminada. Volviendo al inicio…";
-
-        setTimeout(() => {
-          window.location.href = new URL("./", document.baseURI).toString();
-        }, 450);
-      } catch (error) {
-        button.disabled = false;
-        if (status) status.textContent = error.message || "Error terminando sala.";
-      }
-    }, { capture: true });
-  };
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
-  else wire();
-  setTimeout(wire, 500);
+      markRoomEnded(roomID);
+      if (status) status.textContent = "Sala terminada. Volviendo al inicio…";
+      setTimeout(() => {
+        window.location.href = new URL("./", document.baseURI).toString();
+      }, 600);
+    } catch (error) {
+      window.__lastSeenRoomEnding = false;
+      window.__lastSeenExpectedSocketClose = false;
+      button.disabled = false;
+      if (status) status.textContent = error.message || "Error terminando sala.";
+    }
+  }, { capture: true });
 }
 
 function renderLocalPosition(position) {
@@ -162,11 +160,6 @@ function renderLocalPosition(position) {
   };
 
   renderLocalMemberRow(member);
-
-  const roomStatus = document.querySelector("#room-status");
-  if (roomStatus && /^Desconectado/.test(roomStatus.textContent || "") && window.__lastSeenSocketOpen) {
-    roomStatus.textContent = "Conectado. Compartiendo ubicación en tiempo real.";
-  }
 
   if (!map || !window.L) return;
   stabilizeMapLayout(map);
@@ -197,6 +190,15 @@ function renderLocalPosition(position) {
   }
 }
 
+function showJoinCardAgain() {
+  const joinCard = document.querySelector("#join-card");
+  const roomCard = document.querySelector("#room-card");
+  const joinButton = document.querySelector("#join-room");
+  if (joinCard) joinCard.hidden = false;
+  if (roomCard) roomCard.hidden = true;
+  if (joinButton) joinButton.disabled = false;
+}
+
 function renderLocalMemberRow(member) {
   const target = document.querySelector("#members");
   if (!target) return;
@@ -225,30 +227,31 @@ function stabilizeMapLayout(map) {
   [50, 150, 350, 800].forEach(delay => setTimeout(() => map.invalidateSize(), delay));
 }
 
+function markRoomEnded(roomID) {
+  const state = readRoomState();
+  state.active = false;
+  state.endedAt = new Date().toISOString();
+  state.serverRoom = { ...(state.serverRoom || {}), closed: true };
+  localStorage.setItem(`lastseen:${roomID}:state`, JSON.stringify(state));
+}
+
 function readRoomState() {
   const roomID = getRoomID();
   if (!roomID) return {};
   try {
-    return JSON.parse(localStorage.getItem(roomKey(roomID)) || "{}") || {};
+    return JSON.parse(localStorage.getItem(`lastseen:${roomID}:state`) || "{}") || {};
   } catch {
     return {};
   }
 }
 
-function getRoomID() {
-  const params = new URLSearchParams(window.location.search);
-  const queryRoomID = params.get("r") || params.get("room");
-  if (queryRoomID) return queryRoomID;
-  const match = window.location.pathname.match(/\/room\/([^/]+)$/);
-  return match?.[1] || "";
-}
-
-function roomKey(roomID) {
-  return `lastseen:${roomID}:state`;
-}
-
-function creatorTokenKey(roomID) {
-  return `lastseen:${roomID}:creator-token`;
+function readCreatorTokenBackup(roomID) {
+  if (!roomID) return "";
+  try {
+    return localStorage.getItem(`lastseen:${roomID}:creator-token`) || sessionStorage.getItem(`lastseen:${roomID}:creator-token`) || "";
+  } catch {
+    return localStorage.getItem(`lastseen:${roomID}:creator-token`) || "";
+  }
 }
 
 function apiBaseURL() {
@@ -261,6 +264,14 @@ function apiURL(path) {
   return `${apiBaseURL()}${path}`;
 }
 
+function getRoomID() {
+  const params = new URLSearchParams(window.location.search);
+  const queryRoomID = params.get("r") || params.get("room");
+  if (queryRoomID) return queryRoomID;
+  const match = window.location.pathname.match(/\/room\/([^/]+)$/);
+  return match?.[1] || "";
+}
+
 function roundCoord(value) {
   return Math.round(Number(value) * 1000000) / 1000000;
 }
@@ -268,6 +279,14 @@ function roundCoord(value) {
 function shortName(value) {
   const clean = String(value || "Tú").trim();
   return clean.length > 12 ? `${clean.slice(0, 11)}…` : clean;
+}
+
+function safeJSON(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function escapeHTML(value) {
