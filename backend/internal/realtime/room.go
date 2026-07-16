@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -273,16 +274,11 @@ func (r *Room) Snapshot() RoomSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	clients := make([]PublicClient, 0, len(r.clients))
-	for _, client := range r.clients {
-		clients = append(clients, client.toPublicLocked())
-	}
-
 	safety := cloneSafety(r.safety)
 
 	return RoomSnapshot{
 		Room:    r.publicLocked(time.Now().UTC()),
-		Clients: clients,
+		Clients: r.canonicalClientsLocked(),
 		Safety:  safety,
 	}
 }
@@ -356,6 +352,42 @@ func (r *Room) publicLocked(now time.Time) PublicRoom {
 		Closed:    r.Closed,
 		Safety:    cloneSafety(r.safety),
 	}
+}
+
+func (r *Room) canonicalClientsLocked() []PublicClient {
+	byLogicalUser := make(map[string]PublicClient, len(r.clients))
+	for _, client := range r.clients {
+		public := client.toPublicLocked()
+		key := public.logicalUserKey()
+		if previous, ok := byLogicalUser[key]; !ok || preferPublicClient(public, previous) {
+			byLogicalUser[key] = public
+		}
+	}
+
+	clients := make([]PublicClient, 0, len(byLogicalUser))
+	for _, client := range byLogicalUser {
+		clients = append(clients, client)
+	}
+	return clients
+}
+
+func preferPublicClient(next PublicClient, current PublicClient) bool {
+	if next.Connected != current.Connected {
+		return next.Connected
+	}
+	if !next.LastSeen.Equal(current.LastSeen) {
+		return next.LastSeen.After(current.LastSeen)
+	}
+	return next.ID > current.ID
+}
+
+func (p PublicClient) logicalUserKey() string {
+	nick := strings.ToLower(strings.TrimSpace(p.Nickname))
+	avatar := strings.TrimSpace(p.Avatar)
+	if nick != "" || avatar != "" {
+		return nick + "|" + avatar
+	}
+	return p.ID
 }
 
 func (r *Room) isOutsidePerimeterLocked(lat float64, lng float64) bool {

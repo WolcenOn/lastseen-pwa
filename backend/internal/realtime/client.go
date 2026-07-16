@@ -57,7 +57,9 @@ func NewClient(config ClientConfig) *Client {
 func (c *Client) ReadPump(hub *Hub, roomID string) {
 	defer func() {
 		hub.LeaveRoom(roomID, c.ID, c.SessionID)
-		_ = c.Conn.Close()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
 	}()
 
 	c.Conn.SetReadLimit(512)
@@ -103,7 +105,9 @@ func (c *Client) WritePump(hub *Hub) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		_ = c.Conn.Close()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
 	}()
 
 	for {
@@ -128,6 +132,10 @@ func (c *Client) WritePump(hub *Hub) {
 }
 
 func (c *Client) Send(msg OutboundMessage) {
+	if c == nil || c.send == nil {
+		return
+	}
+
 	defer func() {
 		_ = recover()
 	}()
@@ -140,14 +148,22 @@ func (c *Client) Send(msg OutboundMessage) {
 }
 
 func (c *Client) CloseSend() {
+	if c == nil || c.send == nil {
+		return
+	}
 	c.once.Do(func() {
 		close(c.send)
 	})
 }
 
 func (c *Client) Close() {
+	if c == nil {
+		return
+	}
 	c.CloseSend()
-	_ = c.Conn.Close()
+	if c.Conn != nil {
+		_ = c.Conn.Close()
+	}
 }
 
 func (c *Client) Clone() *Client {
