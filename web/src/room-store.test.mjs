@@ -11,6 +11,14 @@ class MemoryStorage {
     this.values = new Map();
   }
 
+  get length() {
+    return this.values.size;
+  }
+
+  key(index) {
+    return [...this.values.keys()][index] || null;
+  }
+
   getItem(key) {
     return this.values.has(key) ? this.values.get(key) : null;
   }
@@ -71,4 +79,48 @@ assert.equal(history.x.on, true);
 
 assert.equal(preferMember({ id: "y", on: true }, { id: "y", on: false }).on, true);
 
-console.log("room-store tests passed");
+installDashboardSmokeDOM();
+await import("./dashboard.js");
+
+function installDashboardSmokeDOM() {
+  const noopElement = () => ({
+    addEventListener() {},
+    appendChild() {},
+    classList: { toggle() {}, add() {}, remove() {} },
+    content: { firstElementChild: { cloneNode: () => noopElement() } },
+    dataset: {},
+    hidden: false,
+    innerHTML: "",
+    open: false,
+    prepend() {},
+    querySelector: () => noopElement(),
+    remove() {},
+    set textContent(value) { this._textContent = value; },
+    get textContent() { return this._textContent || ""; },
+    type: "",
+    value: ""
+  });
+
+  globalThis.localStorage = storage;
+  globalThis.sessionStorage = session;
+  globalThis.window = {
+    location: { origin: "https://example.test" },
+    alert() {},
+    confirm: () => true,
+    LASTSEEN_API_BASE_URL: "https://api.example.test"
+  };
+  globalThis.document = {
+    baseURI: "https://example.test/lastseen-pwa/",
+    querySelector: () => null,
+    createElement: () => noopElement()
+  };
+  globalThis.crypto = {
+    getRandomValues(values) {
+      values.fill(1);
+      return values;
+    }
+  };
+  globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "", json: async () => ({}) });
+}
+
+console.log("frontend smoke tests passed");
