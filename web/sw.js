@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v21";
+const CACHE_VERSION = "lastseen-v22";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -13,6 +13,7 @@ const STATIC_ASSETS = [
   "./src/app.js",
   "./src/dashboard.js",
   "./src/room-store.js",
+  "./src/websocket-client.js",
   "./src/map-position-guard.js",
   "./src/room-enhancements.js"
 ];
