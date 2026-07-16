@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v17";
+const CACHE_VERSION = "lastseen-v18";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -12,6 +12,7 @@ const STATIC_ASSETS = [
   "./assets/icons/icon.svg",
   "./src/app.js",
   "./src/dashboard.js",
+  "./src/map-position-guard.js",
   "./src/room-enhancements.js"
 ];
 
