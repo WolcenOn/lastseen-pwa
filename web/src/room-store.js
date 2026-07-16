@@ -3,7 +3,7 @@ const ROOM_STATE_PREFIX = "lastseen:";
 const ROOM_STATE_SUFFIX = ":state";
 const CREATOR_TOKEN_SUFFIX = ":creator-token";
 
-export function createRoomStore(storage = window.localStorage, sessionStorageRef = window.sessionStorage) {
+export function createRoomStore(storage = defaultStorage(), sessionStorageRef = defaultSessionStorage()) {
   return {
     roomKey,
     creatorTokenKey,
@@ -28,6 +28,38 @@ export function createRoomStore(storage = window.localStorage, sessionStorageRef
 }
 
 export const roomStore = createRoomStore();
+
+function defaultStorage() {
+  return globalThis.localStorage || createMemoryStorage();
+}
+
+function defaultSessionStorage() {
+  return globalThis.sessionStorage || createMemoryStorage();
+}
+
+function createMemoryStorage() {
+  const values = new Map();
+  return {
+    get length() {
+      return values.size;
+    },
+    key(index) {
+      return [...values.keys()][index] || null;
+    },
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    clear() {
+      values.clear();
+    }
+  };
+}
 
 export function roomKey(roomID) {
   return `${ROOM_STATE_PREFIX}${roomID}${ROOM_STATE_SUFFIX}`;
