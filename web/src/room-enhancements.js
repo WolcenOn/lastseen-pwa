@@ -142,7 +142,9 @@ function normalizeStoredRoomState(id) {
   const state = loadRoomState(id);
   if (!state) return null;
 
-  if (state.creatorToken && !state.isCreator) state.isCreator = true;
+  const backupToken = readCreatorTokenBackup(id);
+  if (!state.creatorToken && backupToken) state.creatorToken = backupToken;
+  if (state.creatorToken) state.isCreator = true;
   state.membersHistory = latestMembersByLogicalUser(state.membersHistory || {});
   saveRoomState(id, state);
   return state;
@@ -278,7 +280,9 @@ function ensureCreatorControls(id, providedState = null) {
   });
 
   if (help) help.textContent = "Gestión activa: este navegador conserva el token de creador de esta sala.";
-  if (status && !status.textContent) status.textContent = "Puedes modificar duración o terminar la sala.";
+  if (status && (!status.textContent || status.textContent.includes("bloqueada") || status.textContent.includes("nueva"))) {
+    status.textContent = "Puedes modificar duración o terminar la sala.";
+  }
 }
 
 function hasSavedIdentity(state) {
@@ -342,20 +346,52 @@ function selectAvatar(avatar) {
 
 function loadRoomState(id) {
   try {
-    const state = JSON.parse(localStorage.getItem(roomKey(id)) || "null");
+    const state = JSON.parse(localStorage.getItem(roomKey(id)) || "null") || { roomId: id };
     if (state && !state.roomId) state.roomId = id;
+    const backupToken = readCreatorTokenBackup(id);
+    if (state && !state.creatorToken && backupToken) {
+      state.creatorToken = backupToken;
+      state.isCreator = true;
+      saveRoomState(id, state);
+    }
     return state;
   } catch {
-    return null;
+    const backupToken = readCreatorTokenBackup(id);
+    return backupToken ? { roomId: id, isCreator: true, creatorToken: backupToken } : null;
   }
 }
 
 function saveRoomState(id, state) {
+  if (state?.creatorToken) persistCreatorTokenBackup(id, state.creatorToken);
   localStorage.setItem(roomKey(id), JSON.stringify(state));
 }
 
 function roomKey(id) {
   return `lastseen:${id}:state`;
+}
+
+function creatorTokenKey(id) {
+  return `lastseen:${id}:creator-token`;
+}
+
+function persistCreatorTokenBackup(id, token) {
+  const clean = String(token || "").trim();
+  if (!id || !clean) return;
+  localStorage.setItem(creatorTokenKey(id), clean);
+  try {
+    sessionStorage.setItem(creatorTokenKey(id), clean);
+  } catch {
+    // sessionStorage may be unavailable in some privacy modes.
+  }
+}
+
+function readCreatorTokenBackup(id) {
+  if (!id) return "";
+  try {
+    return localStorage.getItem(creatorTokenKey(id)) || sessionStorage.getItem(creatorTokenKey(id)) || "";
+  } catch {
+    return localStorage.getItem(creatorTokenKey(id)) || "";
+  }
 }
 
 function getRoomID() {
