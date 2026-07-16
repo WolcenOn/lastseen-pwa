@@ -7,9 +7,18 @@ import (
 	"strings"
 )
 
+var defaultAllowedOrigins = map[string]bool{
+	"https://wolcenon.github.io":                         true,
+	"https://lastseen-pwa-production.up.railway.app": true,
+}
+
 func isAllowedOrigin(origin string) bool {
 	origin = strings.TrimSpace(origin)
 	if origin == "" {
+		return true
+	}
+
+	if defaultAllowedOrigins[origin] {
 		return true
 	}
 
