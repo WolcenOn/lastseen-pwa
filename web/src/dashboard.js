@@ -38,6 +38,8 @@ async function createRoomFromDashboard(event) {
       throw new Error(`Railway ha creado la sala, pero no ha devuelto creatorToken. Revisa que Railway esté desplegando main. Campos recibidos: ${Object.keys(data || {}).join(", ") || "ninguno"}.`);
     }
 
+    persistCreatorTokenBackup(roomID, creatorToken);
+
     const previousState = readJSON(roomKey(roomID)) || {};
     const state = normalizeRoomState(roomID, previousState);
     state.roomId = roomID;
@@ -102,6 +104,7 @@ function readSavedRoomStates() {
 }
 
 function normalizeRoomState(roomID, state) {
+  const creatorToken = state.creatorToken || readCreatorTokenBackup(roomID);
   const normalized = {
     roomId: state.roomId || roomID,
     roomName: state.roomName || "Sala LastSeen",
@@ -109,8 +112,8 @@ function normalizeRoomState(roomID, state) {
     nickname: state.nickname || "",
     avatar: state.avatar || "",
     pin: state.pin || "",
-    isCreator: Boolean(state.isCreator || state.creatorToken),
-    creatorToken: state.creatorToken || "",
+    isCreator: Boolean(state.isCreator || creatorToken),
+    creatorToken,
     ttl: Number(state.ttl || 0),
     createdAt: state.createdAt || "",
     lastJoinedAt: state.lastJoinedAt || "",
@@ -121,7 +124,9 @@ function normalizeRoomState(roomID, state) {
     serverRoom: null
   };
 
-  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length || normalized.isCreator !== Boolean(state.isCreator)) {
+  if (creatorToken) persistCreatorTokenBackup(roomID, creatorToken);
+
+  if (Object.keys(state.membersHistory || {}).length !== Object.keys(normalized.membersHistory).length || normalized.isCreator !== Boolean(state.isCreator) || normalized.creatorToken !== state.creatorToken) {
     saveRoomState(normalized.roomId, normalized);
   }
 
@@ -360,6 +365,7 @@ function newestMember(left, right) {
 
 function saveRoomState(roomID, state) {
   const normalized = { ...state, isCreator: Boolean(state.isCreator || state.creatorToken), membersHistory: dedupeMembersHistory(state.membersHistory || {}) };
+  if (normalized.creatorToken) persistCreatorTokenBackup(roomID, normalized.creatorToken);
   localStorage.setItem(roomKey(roomID), JSON.stringify(normalized));
   localStorage.setItem("lastseen:last-room", roomID);
   addRoomToIndex(roomID);
@@ -380,6 +386,30 @@ function addRoomToIndex(roomID) {
 
 function roomKey(roomID) {
   return `lastseen:${roomID}:state`;
+}
+
+function creatorTokenKey(roomID) {
+  return `lastseen:${roomID}:creator-token`;
+}
+
+function persistCreatorTokenBackup(roomID, token) {
+  const clean = String(token || "").trim();
+  if (!roomID || !clean) return;
+  localStorage.setItem(creatorTokenKey(roomID), clean);
+  try {
+    sessionStorage.setItem(creatorTokenKey(roomID), clean);
+  } catch {
+    // sessionStorage may be unavailable in some privacy modes.
+  }
+}
+
+function readCreatorTokenBackup(roomID) {
+  if (!roomID) return "";
+  try {
+    return localStorage.getItem(creatorTokenKey(roomID)) || sessionStorage.getItem(creatorTokenKey(roomID)) || "";
+  } catch {
+    return localStorage.getItem(creatorTokenKey(roomID)) || "";
+  }
 }
 
 function apiBaseURL() {
