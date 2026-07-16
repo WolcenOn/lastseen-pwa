@@ -23,13 +23,13 @@ type InboundMessage struct {
 func (m InboundMessage) Valid() bool {
 	switch m.Type {
 	case "loc":
-		return validLatLng(m.Lat, m.Lng)
+		return validLatLng(m.Lat, m.Lng) && validBatteryLevel(m.BatteryLevel)
 	case "panic":
 		return true
 	case "wake":
 		return m.TargetID != ""
 	case "sos":
-		return validLatLng(m.Lat, m.Lng)
+		return validLatLng(m.Lat, m.Lng) && validBatteryLevel(m.BatteryLevel)
 	case "disconnect":
 		return m.PIN != ""
 	case "meet":
@@ -101,4 +101,8 @@ type PublicClient struct {
 
 func validLatLng(lat, lng float64) bool {
 	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat == 0 && lng == 0)
+}
+
+func validBatteryLevel(value float64) bool {
+	return value >= 0 && value <= 1
 }
