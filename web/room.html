@@ -7,7 +7,7 @@
     <title>Sala | LastSeen</title>
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./assets/icons/icon.svg" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBouJIRIsx2uomfW8BXDN33HhXvh5gx8KewM=" crossorigin="" />
     <link rel="stylesheet" href="./assets/css/app.css" />
   </head>
   <body>
@@ -97,39 +97,5 @@
     <script src="./config.js"></script>
     <script type="module" src="./src/app.js"></script>
     <script type="module" src="./src/room-enhancements.js"></script>
-    <script>
-      window.addEventListener("load", () => {
-        const params = new URLSearchParams(window.location.search);
-        const roomID = params.get("r") || params.get("room") || "";
-        if (!roomID) return;
-
-        const panel = document.querySelector("#creator-panel");
-        const status = document.querySelector("#creator-status");
-        const help = document.querySelector("#creator-help");
-        if (!panel) return;
-
-        let state = {};
-        try {
-          state = JSON.parse(localStorage.getItem(`lastseen:${roomID}:state`) || "{}");
-        } catch {
-          state = {};
-        }
-
-        if (state.creatorToken) return;
-
-        panel.hidden = false;
-        panel.classList.add("locked");
-        panel.querySelectorAll("select, button").forEach(control => {
-          control.disabled = true;
-        });
-
-        if (help) {
-          help.textContent = "Gestión no disponible en este dispositivo: solo se activa en el navegador que creó esta sala y en salas creadas con la versión nueva.";
-        }
-        if (status) {
-          status.textContent = "Crea una sala nueva desde este dispositivo para ver estos controles activos.";
-        }
-      });
-    </script>
   </body>
 </html>
