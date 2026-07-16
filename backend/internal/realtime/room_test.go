@@ -1,18 +1,23 @@
 package realtime
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestAddClientReconnectsSameClientIDWithoutDuplicate(t *testing.T) {
-	room := NewRoom(RoomConfig{
-		ID:             "room-a",
-		Name:           "Room A",
+func newTestRoom() *Room {
+	return NewRoom(RoomConfig{
+		ID:             "room-test",
+		Name:           "Room Test",
 		CreatorToken:   "creator-token",
 		TTL:            time.Hour,
-		MaxFreeClients: 3,
+		MaxFreeClients: 10,
 	})
+}
+
+func TestAddClientReconnectsSameClientIDWithoutDuplicate(t *testing.T) {
+	room := newTestRoom()
 
 	first := NewClient(ClientConfig{
 		ID:        "client-1",
@@ -34,7 +39,7 @@ func TestAddClientReconnectsSameClientIDWithoutDuplicate(t *testing.T) {
 		SessionID: "session-new",
 		Nickname:  "Pedro",
 		PIN:       "1234",
-		Avatar:    "🐼",
+		Avatar:    "🦊",
 	})
 
 	if err := room.AddClient(second); err != nil {
@@ -50,19 +55,83 @@ func TestAddClientReconnectsSameClientIDWithoutDuplicate(t *testing.T) {
 	if client.ID != "client-1" || !client.Connected {
 		t.Fatalf("unexpected public client: %+v", client)
 	}
+	if client.Nickname != "Pedro" {
+		t.Fatalf("expected reconnect to preserve original nickname, got %q", client.Nickname)
+	}
 	if client.Lat != 37.1 || client.Lng != -7.1 || client.BatteryLevel != 0.53 {
 		t.Fatalf("expected last location to be preserved, got %+v", client)
 	}
 }
 
+func TestAddClientRejectsDuplicateNicknameForDifferentClient(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	err := room.AddClient(NewClient(ClientConfig{ID: "client-2", SessionID: "b", Nickname: "Pedro", PIN: "2222", Avatar: "🦊"}))
+	if !errors.Is(err, ErrNicknameTaken) {
+		t.Fatalf("expected ErrNicknameTaken, got %v", err)
+	}
+}
+
+func TestAddClientRejectsDuplicateNicknameCaseInsensitive(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	err := room.AddClient(NewClient(ClientConfig{ID: "client-2", SessionID: "b", Nickname: "pedro", PIN: "2222", Avatar: "🦊"}))
+	if !errors.Is(err, ErrNicknameTaken) {
+		t.Fatalf("expected ErrNicknameTaken for case-insensitive duplicate, got %v", err)
+	}
+}
+
+func TestAddClientRejectsDuplicateNicknameWithOuterSpaces(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	err := room.AddClient(NewClient(ClientConfig{ID: "client-2", SessionID: "b", Nickname: "  Pedro  ", PIN: "2222", Avatar: "🦊"}))
+	if !errors.Is(err, ErrNicknameTaken) {
+		t.Fatalf("expected ErrNicknameTaken for trimmed duplicate, got %v", err)
+	}
+}
+
+func TestAddClientAllowsSameAvatarWithDifferentNickname(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-2", SessionID: "b", Nickname: "Lucia", PIN: "2222", Avatar: "🐼"})); err != nil {
+		t.Fatalf("same avatar with different nickname should be allowed, got %v", err)
+	}
+}
+
+func TestDisconnectedNicknameRemainsReserved(t *testing.T) {
+	room := newTestRoom()
+
+	first := NewClient(ClientConfig{ID: "client-1", SessionID: "old", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})
+	if err := room.AddClient(first); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+	if _, ok := room.MarkDisconnected("client-1", "old"); !ok {
+		t.Fatal("expected disconnect to be recorded")
+	}
+
+	err := room.AddClient(NewClient(ClientConfig{ID: "client-2", SessionID: "new", Nickname: "Pedro", PIN: "2222", Avatar: "🦊"}))
+	if !errors.Is(err, ErrNicknameTaken) {
+		t.Fatalf("expected disconnected nickname to remain reserved, got %v", err)
+	}
+}
+
 func TestOldSessionDisconnectDoesNotMarkNewSessionOffline(t *testing.T) {
-	room := NewRoom(RoomConfig{
-		ID:             "room-b",
-		Name:           "Room B",
-		CreatorToken:   "creator-token",
-		TTL:            time.Hour,
-		MaxFreeClients: 3,
-	})
+	room := newTestRoom()
 
 	first := NewClient(ClientConfig{ID: "client-1", SessionID: "old", Nickname: "Pedro", PIN: "1234", Avatar: "🐼"})
 	if err := room.AddClient(first); err != nil {
@@ -87,36 +156,27 @@ func TestOldSessionDisconnectDoesNotMarkNewSessionOffline(t *testing.T) {
 	}
 }
 
-func TestSnapshotCanonicalizesDuplicateLogicalUsers(t *testing.T) {
-	room := NewRoom(RoomConfig{
-		ID:             "room-c",
-		Name:           "Room C",
-		CreatorToken:   "creator-token",
-		TTL:            time.Hour,
-		MaxFreeClients: 10,
-	})
+func TestSnapshotOrderingIsDeterministic(t *testing.T) {
+	room := newTestRoom()
 
-	offline := NewClient(ClientConfig{ID: "old-client", SessionID: "old", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})
-	offline.Connected = false
-	offline.Lat = 37.1
-	offline.Lng = -7.1
-	offline.LastSeen = time.Now().UTC().Add(-10 * time.Minute)
-	room.clients[offline.ID] = offline
-
-	online := NewClient(ClientConfig{ID: "new-client", SessionID: "new", Nickname: "Pedro", PIN: "2222", Avatar: "🐼"})
-	online.Lat = 37.2
-	online.Lng = -7.2
-	if err := room.AddClient(online); err != nil {
-		t.Fatalf("online add failed: %v", err)
+	clients := []*Client{
+		NewClient(ClientConfig{ID: "client-c", SessionID: "c", Nickname: "Zoe", PIN: "3333", Avatar: "🐼"}),
+		NewClient(ClientConfig{ID: "client-a", SessionID: "a", Nickname: "Ana", PIN: "1111", Avatar: "🦊"}),
+		NewClient(ClientConfig{ID: "client-b", SessionID: "b", Nickname: "Luis", PIN: "2222", Avatar: "🐼"}),
+	}
+	for _, client := range clients {
+		if err := room.AddClient(client); err != nil {
+			t.Fatalf("add failed: %v", err)
+		}
 	}
 
 	snapshot := room.Snapshot()
-	if got := len(snapshot.Clients); got != 1 {
-		t.Fatalf("expected one canonical logical participant, got %d: %+v", got, snapshot.Clients)
-	}
-	client := snapshot.Clients[0]
-	if client.ID != "new-client" || !client.Connected {
-		t.Fatalf("expected online duplicate to win, got %+v", client)
+	got := []string{snapshot.Clients[0].Nickname, snapshot.Clients[1].Nickname, snapshot.Clients[2].Nickname}
+	want := []string{"Ana", "Luis", "Zoe"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("snapshot order = %v, want %v", got, want)
+		}
 	}
 }
 
