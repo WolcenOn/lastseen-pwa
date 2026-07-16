@@ -96,7 +96,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("lastseen server listening on %s version=%s", addr, backendVersion)
+		log.Printf("lastseen server listening on %s", addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
@@ -115,6 +115,7 @@ func main() {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-LastSeen-Version", backendVersion)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"version": backendVersion,
@@ -261,7 +262,7 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 			Conn:      conn,
 		})
 		if err := hub.JoinRoom(roomID, client); err != nil {
-			_ = conn.WriteJSON(realtime.OutboundMessage{Type: "error", Data: map[string]string{"message": err.Error()}})
+			_ = conn.WriteJSON(joinErrorMessage(err))
 			_ = conn.Close()
 			return
 		}
@@ -269,6 +270,13 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 		go client.WritePump(hub)
 		go client.ReadPump(hub, roomID)
 	}
+}
+
+func joinErrorMessage(err error) realtime.OutboundMessage {
+	if errors.Is(err, realtime.ErrNicknameTaken) {
+		return realtime.OutboundMessage{Type: "error", Data: map[string]string{"code": "nickname_taken", "message": "Ese mote ya está en uso en esta sala. Elige otro."}}
+	}
+	return realtime.OutboundMessage{Type: "error", Data: map[string]string{"code": "join_failed", "message": err.Error()}}
 }
 
 func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err error) {
@@ -382,7 +390,6 @@ func randomURLSafe(size int) (string, error) {
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-LastSeen-Version", backendVersion)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
