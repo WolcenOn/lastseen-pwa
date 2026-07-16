@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       api_base_url:
-        description: "Public Railway backend URL, for example https://lastseen-production.up.railway.app"
-        required: true
+        description: "Public Railway backend URL, for example https://lastseen-pwa-production.up.railway.app"
+        required: false
         type: string
   push:
     branches:
@@ -22,6 +22,9 @@ permissions:
 concurrency:
   group: pages
   cancel-in-progress: false
+
+env:
+  DEFAULT_LASTSEEN_API_BASE_URL: https://lastseen-pwa-production.up.railway.app
 
 jobs:
   deploy:
@@ -41,9 +44,9 @@ jobs:
             API_BASE_URL="${{ vars.LASTSEEN_API_BASE_URL }}"
           fi
           if [ -z "$API_BASE_URL" ]; then
-            echo "LASTSEEN_API_BASE_URL is required. Set it as a repository variable or run this workflow manually with api_base_url." >&2
-            exit 1
+            API_BASE_URL="$DEFAULT_LASTSEEN_API_BASE_URL"
           fi
+          echo "Using API base URL: $API_BASE_URL"
           cat > web/config.js <<EOF
           window.LASTSEEN_API_BASE_URL = "$API_BASE_URL";
           EOF
