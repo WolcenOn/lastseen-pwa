@@ -31,10 +31,8 @@ export function createReconnectBackoff(options = {}) {
   };
 }
 
-export class ReconnectingWebSocketClient extends EventTarget {
+export class ReconnectingWebSocketClient {
   constructor(options) {
-    super();
-
     if (!options?.urlFactory) throw new Error("urlFactory is required");
 
     this.urlFactory = options.urlFactory;
@@ -51,6 +49,18 @@ export class ReconnectingWebSocketClient extends EventTarget {
     this.reconnectTimer = null;
     this.closedIntentionally = true;
     this.latestPosition = null;
+    this.listeners = new Map();
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    this.listeners.set(type, listeners.filter(candidate => candidate !== listener));
   }
 
   connect() {
@@ -104,22 +114,22 @@ export class ReconnectingWebSocketClient extends EventTarget {
       this.reconnectAttempts = 0;
       this.#setState(SOCKET_STATES.CONNECTED);
       if (this.latestPosition) {
-        this.dispatchEvent(new CustomEvent("resend-position", { detail: this.latestPosition }));
+        this.#emit("resend-position", this.latestPosition);
       }
     });
 
     socket.addEventListener("message", event => {
       if (this.socket !== socket || this.closedIntentionally) return;
       try {
-        this.dispatchEvent(new CustomEvent("message", { detail: this.parseMessage(event) }));
+        this.#emit("message", this.parseMessage(event));
       } catch (error) {
-        this.dispatchEvent(new CustomEvent("parse-error", { detail: error }));
+        this.#emit("parse-error", error);
       }
     });
 
     socket.addEventListener("error", event => {
       if (this.socket !== socket || this.closedIntentionally) return;
-      this.dispatchEvent(new CustomEvent("socket-error", { detail: event }));
+      this.#emit("socket-error", event);
     });
 
     socket.addEventListener("close", event => {
@@ -159,6 +169,13 @@ export class ReconnectingWebSocketClient extends EventTarget {
   #setState(state, detail = {}) {
     if (this.state === state && Object.keys(detail).length === 0) return;
     this.state = state;
-    this.dispatchEvent(new CustomEvent("state", { detail: { state, ...detail } }));
+    this.#emit("state", { state, ...detail });
+  }
+
+  #emit(type, detail) {
+    const event = { type, detail };
+    for (const listener of this.listeners.get(type) || []) {
+      listener(event);
+    }
   }
 }
