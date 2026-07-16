@@ -5,6 +5,7 @@ let localPosition = null;
 installLeafletMapCapture();
 installGeolocationCapture();
 installWebSocketDiagnostics();
+installRoomEndGuard();
 
 function installLeafletMapCapture() {
   if (!window.L || typeof window.L.map !== "function") return;
@@ -54,13 +55,24 @@ function installWebSocketDiagnostics() {
 
   function PatchedWebSocket(url, protocols) {
     const socket = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
+    socket.addEventListener("open", () => {
+      window.__lastSeenSocketOpen = true;
+      window.__lastSeenExpectedSocketClose = false;
+    });
+    socket.addEventListener("message", () => {
+      window.__lastSeenSocketOpen = true;
+    });
     socket.addEventListener("close", event => {
+      window.__lastSeenSocketOpen = false;
+      if (window.__lastSeenExpectedSocketClose || event.code === 1000) return;
+
       const status = document.querySelector("#room-status") || document.querySelector("#status");
       if (!status) return;
       const suffix = event.code ? ` Código WS: ${event.code}${event.reason ? ` · ${event.reason}` : ""}.` : "";
       status.textContent = `Desconectado del servidor.${suffix}`;
     });
     socket.addEventListener("error", () => {
+      if (window.__lastSeenExpectedSocketClose) return;
       const status = document.querySelector("#room-status") || document.querySelector("#status");
       if (status) status.textContent = "Error de conexión WebSocket. Revisa permisos de origen o cobertura.";
     });
@@ -74,6 +86,61 @@ function installWebSocketDiagnostics() {
   PatchedWebSocket.CLOSED = NativeWebSocket.CLOSED;
   PatchedWebSocket.__lastSeenPatched = true;
   window.WebSocket = PatchedWebSocket;
+}
+
+function installRoomEndGuard() {
+  const wire = () => {
+    const button = document.querySelector("#end-room");
+    if (!button || button.__lastSeenEndGuard) return;
+    button.__lastSeenEndGuard = true;
+
+    button.addEventListener("click", async event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const roomID = getRoomID();
+      const state = readRoomState();
+      const token = String(state.creatorToken || localStorage.getItem(creatorTokenKey(roomID)) || "").trim();
+      const status = document.querySelector("#creator-status") || document.querySelector("#room-status") || document.querySelector("#status");
+
+      if (!token) {
+        if (status) status.textContent = "No hay token de creador guardado en este dispositivo.";
+        return;
+      }
+      if (!window.confirm("¿Terminar esta sala para todos?")) return;
+
+      button.disabled = true;
+      if (status) status.textContent = "Terminando sala…";
+
+      try {
+        const response = await fetch(apiURL(`/api/rooms/${encodeURIComponent(roomID)}`), {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", "X-Creator-Token": token },
+          body: JSON.stringify({ creatorToken: token })
+        });
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`No se pudo terminar la sala (${response.status}). ${body || "Revisa Railway/backend."}`);
+        }
+
+        const nextState = { ...state, endedAt: new Date().toISOString(), active: false };
+        localStorage.setItem(roomKey(roomID), JSON.stringify(nextState));
+        window.__lastSeenExpectedSocketClose = true;
+        if (status) status.textContent = "Sala terminada. Volviendo al inicio…";
+
+        setTimeout(() => {
+          window.location.href = new URL("./", document.baseURI).toString();
+        }, 450);
+      } catch (error) {
+        button.disabled = false;
+        if (status) status.textContent = error.message || "Error terminando sala.";
+      }
+    }, { capture: true });
+  };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
+  else wire();
+  setTimeout(wire, 500);
 }
 
 function renderLocalPosition(position) {
@@ -95,6 +162,11 @@ function renderLocalPosition(position) {
   };
 
   renderLocalMemberRow(member);
+
+  const roomStatus = document.querySelector("#room-status");
+  if (roomStatus && /^Desconectado/.test(roomStatus.textContent || "") && window.__lastSeenSocketOpen) {
+    roomStatus.textContent = "Conectado. Compartiendo ubicación en tiempo real.";
+  }
 
   if (!map || !window.L) return;
   stabilizeMapLayout(map);
@@ -157,7 +229,7 @@ function readRoomState() {
   const roomID = getRoomID();
   if (!roomID) return {};
   try {
-    return JSON.parse(localStorage.getItem(`lastseen:${roomID}:state`) || "{}") || {};
+    return JSON.parse(localStorage.getItem(roomKey(roomID)) || "{}") || {};
   } catch {
     return {};
   }
@@ -169,6 +241,24 @@ function getRoomID() {
   if (queryRoomID) return queryRoomID;
   const match = window.location.pathname.match(/\/room\/([^/]+)$/);
   return match?.[1] || "";
+}
+
+function roomKey(roomID) {
+  return `lastseen:${roomID}:state`;
+}
+
+function creatorTokenKey(roomID) {
+  return `lastseen:${roomID}:creator-token`;
+}
+
+function apiBaseURL() {
+  const configured = String(window.LASTSEEN_API_BASE_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+  return window.location.origin;
+}
+
+function apiURL(path) {
+  return `${apiBaseURL()}${path}`;
 }
 
 function roundCoord(value) {
