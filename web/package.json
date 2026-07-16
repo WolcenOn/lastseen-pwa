@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node ./src/room-store.test.mjs && node ./src/websocket-client.test.mjs"
+  }
+}
