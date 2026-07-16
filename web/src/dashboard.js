@@ -19,10 +19,16 @@ async function createRoomFromDashboard(event) {
   event.preventDefault();
   event.stopImmediatePropagation();
 
-  setStatus("Creando sala efímera…");
+  setStatus("Comprobando backend…");
   createRoomButton.disabled = true;
 
   try {
+    const health = await readBackendHealth();
+    if (!health.supportsCreatorToken) {
+      throw new Error(`Backend antiguo o URL equivocada. La PWA está usando ${apiBaseURL()}. /api/health respondió: ${health.summary}. Redeploya Railway en main o revisa LASTSEEN_API_BASE_URL.`);
+    }
+
+    setStatus("Creando sala efímera…");
     const response = await fetch(apiURL("/api/rooms"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -35,7 +41,7 @@ async function createRoomFromDashboard(event) {
     const creatorToken = String(data.creatorToken || "").trim();
     if (!roomID) throw new Error("La respuesta del servidor no contiene sala válida");
     if (!creatorToken) {
-      throw new Error(`Railway ha creado la sala, pero no ha devuelto creatorToken. Revisa que Railway esté desplegando main. Campos recibidos: ${Object.keys(data || {}).join(", ") || "ninguno"}.`);
+      throw new Error(`Railway ha creado la sala, pero no ha devuelto creatorToken. Backend: ${health.summary}. Campos recibidos: ${Object.keys(data || {}).join(", ") || "ninguno"}.`);
     }
 
     persistCreatorTokenBackup(roomID, creatorToken);
@@ -59,6 +65,27 @@ async function createRoomFromDashboard(event) {
   } catch (error) {
     createRoomButton.disabled = false;
     setStatus(error.message || "Error creando sala");
+  }
+}
+
+async function readBackendHealth() {
+  try {
+    const response = await fetch(apiURL("/api/health"), { cache: "no-store" });
+    if (!response.ok) {
+      return { supportsCreatorToken: false, summary: `HTTP ${response.status}` };
+    }
+
+    const data = await response.json();
+    const supportsCreatorToken = Boolean(data?.features?.creatorToken);
+    return {
+      supportsCreatorToken,
+      summary: JSON.stringify(data)
+    };
+  } catch (error) {
+    return {
+      supportsCreatorToken: false,
+      summary: error?.message || "no se pudo consultar /api/health"
+    };
   }
 }
 
