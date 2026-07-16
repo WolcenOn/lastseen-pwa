@@ -32,13 +32,18 @@ async function createRoomFromDashboard(event) {
 
     const data = await response.json();
     const roomID = data.roomId || extractRoomID(data.url);
+    const creatorToken = String(data.creatorToken || "").trim();
     if (!roomID) throw new Error("La respuesta del servidor no contiene sala válida");
+    if (!creatorToken) {
+      throw new Error(`Railway ha creado la sala, pero no ha devuelto creatorToken. Revisa que Railway esté desplegando main. Campos recibidos: ${Object.keys(data || {}).join(", ") || "ninguno"}.`);
+    }
 
-    const state = normalizeRoomState(roomID, readJSON(roomKey(roomID)) || {});
+    const previousState = readJSON(roomKey(roomID)) || {};
+    const state = normalizeRoomState(roomID, previousState);
     state.roomId = roomID;
     state.roomName = data.name || state.roomName || "Sala LastSeen";
     state.isCreator = true;
-    state.creatorToken = data.creatorToken || state.creatorToken || "";
+    state.creatorToken = creatorToken;
     state.ttl = Number(data.ttl || state.ttl || DEFAULT_ROOM_TTL_SECONDS);
     state.clientId = state.clientId || generateClientID();
     state.createdAt = new Date().toISOString();
@@ -206,7 +211,7 @@ function renderSavedRoom(room) {
     }
   } else {
     actions.appendChild(disabledAction(createdHere
-      ? "Sala creada aquí, pero sin token de creador guardado. Crea una sala nueva con la versión actual o revisa que Railway esté en main."
+      ? "Sala creada aquí, pero sin token de creador guardado. Esa sala se creó con un backend que no devolvió creatorToken; crea otra tras redesplegar Railway en main."
       : "Sin permisos de creador en este dispositivo."));
   }
 
