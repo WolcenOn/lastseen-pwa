@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -84,6 +85,15 @@ func (r *Room) AddClient(client *Client) error {
 		return ErrRoomClosed
 	}
 
+	previous, reconnecting := r.clients[client.ID]
+	if reconnecting && previous.Nickname != "" {
+		client.Nickname = previous.Nickname
+	}
+
+	if r.nicknameTakenLocked(client.ID, client.Nickname) {
+		return ErrNicknameTaken
+	}
+
 	activeCount := 0
 	for id, c := range r.clients {
 		if id == client.ID {
@@ -94,11 +104,11 @@ func (r *Room) AddClient(client *Client) error {
 		}
 	}
 
-	if _, reconnecting := r.clients[client.ID]; !reconnecting && activeCount >= r.MaxFreeClients {
+	if !reconnecting && activeCount >= r.MaxFreeClients {
 		return ErrRoomFull
 	}
 
-	if previous, ok := r.clients[client.ID]; ok {
+	if reconnecting {
 		client.Lat = previous.Lat
 		client.Lng = previous.Lng
 		client.BatteryLevel = previous.BatteryLevel
@@ -116,6 +126,27 @@ func (r *Room) AddClient(client *Client) error {
 	r.touchLocked()
 
 	return nil
+}
+
+func (r *Room) nicknameTakenLocked(clientID string, nickname string) bool {
+	key := normalizeNickname(nickname)
+	if key == "" {
+		return false
+	}
+
+	for id, client := range r.clients {
+		if id == clientID {
+			continue
+		}
+		if normalizeNickname(client.Nickname) == key {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeNickname(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (r *Room) MarkDisconnected(clientID string, sessionID string) (*Client, bool) {
@@ -278,7 +309,7 @@ func (r *Room) Snapshot() RoomSnapshot {
 
 	return RoomSnapshot{
 		Room:    r.publicLocked(time.Now().UTC()),
-		Clients: r.canonicalClientsLocked(),
+		Clients: r.publicClientsLocked(),
 		Safety:  safety,
 	}
 }
@@ -354,40 +385,22 @@ func (r *Room) publicLocked(now time.Time) PublicRoom {
 	}
 }
 
-func (r *Room) canonicalClientsLocked() []PublicClient {
-	byLogicalUser := make(map[string]PublicClient, len(r.clients))
+func (r *Room) publicClientsLocked() []PublicClient {
+	clients := make([]PublicClient, 0, len(r.clients))
 	for _, client := range r.clients {
-		public := client.toPublicLocked()
-		key := public.logicalUserKey()
-		if previous, ok := byLogicalUser[key]; !ok || preferPublicClient(public, previous) {
-			byLogicalUser[key] = public
+		clients = append(clients, client.toPublicLocked())
+	}
+
+	sort.SliceStable(clients, func(i int, j int) bool {
+		leftNick := normalizeNickname(clients[i].Nickname)
+		rightNick := normalizeNickname(clients[j].Nickname)
+		if leftNick != rightNick {
+			return leftNick < rightNick
 		}
-	}
+		return clients[i].ID < clients[j].ID
+	})
 
-	clients := make([]PublicClient, 0, len(byLogicalUser))
-	for _, client := range byLogicalUser {
-		clients = append(clients, client)
-	}
 	return clients
-}
-
-func preferPublicClient(next PublicClient, current PublicClient) bool {
-	if next.Connected != current.Connected {
-		return next.Connected
-	}
-	if !next.LastSeen.Equal(current.LastSeen) {
-		return next.LastSeen.After(current.LastSeen)
-	}
-	return next.ID > current.ID
-}
-
-func (p PublicClient) logicalUserKey() string {
-	nick := strings.ToLower(strings.TrimSpace(p.Nickname))
-	avatar := strings.TrimSpace(p.Avatar)
-	if nick != "" || avatar != "" {
-		return nick + "|" + avatar
-	}
-	return p.ID
 }
 
 func (r *Room) isOutsidePerimeterLocked(lat float64, lng float64) bool {
