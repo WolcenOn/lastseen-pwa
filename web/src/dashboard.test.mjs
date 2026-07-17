@@ -68,12 +68,19 @@ globalThis.document = {
   querySelector: () => null,
   createElement: () => createElementStub()
 };
-globalThis.crypto = {
-  getRandomValues(values) {
-    values.fill(1);
-    return values;
-  }
-};
+
+if (!globalThis.crypto?.getRandomValues) {
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: {
+      getRandomValues(values) {
+        values.fill(1);
+        return values;
+      }
+    }
+  });
+}
+
 globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "", json: async () => ({}) });
 
 await import("./dashboard.js");
