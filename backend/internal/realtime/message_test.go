@@ -46,19 +46,28 @@ func TestInboundPerimeterMessageValidation(t *testing.T) {
 }
 
 func TestInboundControlMessageValidation(t *testing.T) {
-	if !((InboundMessage{Type: "disconnect", PIN: "1234"}).Valid()) {
+	validDisconnect := InboundMessage{Type: "disconnect", PIN: "1234"}
+	if !validDisconnect.Valid() {
 		t.Fatal("expected valid disconnect with PIN")
 	}
-	if (InboundMessage{Type: "disconnect"}).Valid() {
+
+	missingPIN := InboundMessage{Type: "disconnect"}
+	if missingPIN.Valid() {
 		t.Fatal("expected disconnect without PIN to be invalid")
 	}
-	if !((InboundMessage{Type: "wake", TargetID: "client-1"}).Valid()) {
+
+	validWake := InboundMessage{Type: "wake", TargetID: "client-1"}
+	if !validWake.Valid() {
 		t.Fatal("expected wake with target to be valid")
 	}
-	if (InboundMessage{Type: "wake"}).Valid() {
+
+	missingTarget := InboundMessage{Type: "wake"}
+	if missingTarget.Valid() {
 		t.Fatal("expected wake without target to be invalid")
 	}
-	if (InboundMessage{Type: "unknown"}).Valid() {
+
+	unknownType := InboundMessage{Type: "unknown"}
+	if unknownType.Valid() {
 		t.Fatal("expected unknown message type to be invalid")
 	}
 }
