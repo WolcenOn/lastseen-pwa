@@ -55,10 +55,82 @@ input, select {
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
-button, .button-like { cursor: pointer; color: #04111f; background: #38bdf8; font-weight: 800; text-align: center; text-decoration: none; }
-button:disabled { cursor: not-allowed; opacity: 0.45; }
+button,
+.button-like {
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+  color: #04111f;
+  background: #38bdf8;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+  touch-action: manipulation;
+  transform: translateY(0) scale(1);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+button::after,
+.button-like::after {
+  content: "";
+  position: absolute;
+  inset: 50%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+}
+button:active,
+.button-like:active,
+button.is-pressing,
+.button-like.is-pressing {
+  transform: translateY(2px) scale(0.985);
+  box-shadow: inset 0 2px 12px rgba(2, 6, 23, 0.26);
+}
+button.is-pressing::after,
+.button-like.is-pressing::after {
+  animation: button-ripple 360ms ease-out;
+}
+button.is-active-action,
+.button-like.is-active-action {
+  border-color: rgba(34, 197, 94, 0.95) !important;
+  background: rgba(34, 197, 94, 0.18) !important;
+  color: #dcfce7 !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.24), 0 12px 30px rgba(2, 6, 23, 0.32);
+}
+button.is-active-action::before,
+.button-like.is-active-action::before {
+  content: "Toca el mapa";
+  position: absolute;
+  right: 10px;
+  top: 6px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #22c55e;
+  color: #052e16;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+button:disabled { cursor: not-allowed; opacity: 0.45; transform: none; }
 button.secondary, .button-like.secondary { background: transparent; color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.3); }
 button.danger, .button-like.danger { background: #fb7185; color: #450a0a; }
+
+@keyframes button-ripple {
+  0% { opacity: 0.75; transform: translate(-50%, -50%) scale(0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .button-like {
+    transition: none;
+  }
+  button.is-pressing::after,
+  .button-like.is-pressing::after {
+    animation: none;
+  }
+}
 
 .eyebrow {
   margin: 0 0 8px;
