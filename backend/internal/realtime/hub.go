@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	ErrRoomNotFound   = errors.New("room not found")
-	ErrRoomFull       = errors.New("room is full for free tier")
-	ErrRoomClosed     = errors.New("room is closed")
-	ErrForbidden      = errors.New("creator token is invalid")
-	ErrNicknameTaken  = errors.New("nickname_taken")
+	ErrRoomNotFound  = errors.New("room not found")
+	ErrRoomFull      = errors.New("room is full for free tier")
+	ErrRoomClosed    = errors.New("room is closed")
+	ErrForbidden     = errors.New("creator token is invalid")
+	ErrNicknameTaken = errors.New("nickname_taken")
 )
 
 type HubConfig struct {
