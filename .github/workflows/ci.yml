@@ -27,7 +27,13 @@ jobs:
 
       - name: Format check
         working-directory: backend
-        run: test -z "$(gofmt -l ./cmd ./internal)"
+        run: |
+          files="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$files" ]; then
+            echo "Files not formatted with gofmt:"
+            echo "$files"
+            exit 1
+          fi
 
       - name: Test
         working-directory: backend
