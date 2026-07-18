@@ -1,10 +1,11 @@
+import { attachMapZoneDrawer } from "./map-zone-drawer.js";
+
 const capturedMaps = [];
+const zoneDrawers = new WeakMap();
 let localMarker = null;
 let localPosition = null;
 let activeSocket = null;
 let pendingSafetyAction = "";
-let safetyMeetingMarker = null;
-let safetyPerimeterCircle = null;
 let markerSpreadCounter = 0;
 
 installLeafletMarkerSpread();
@@ -59,6 +60,7 @@ function installLeafletMapCapture() {
     const map = originalMap(...args);
     capturedMaps.push(map);
     window.__lastSeenMap = map;
+    ensureZoneDrawer(map);
     stabilizeMapLayout(map);
     installSafetyMapClick(map);
     if (localPosition) renderLocalPosition(localPosition);
@@ -213,9 +215,10 @@ function installSafetyControls() {
 
     const map = currentMap();
     if (!map) return setSafetyStatus("Abre el mapa antes de fijar puntos de seguridad.");
+    ensureZoneDrawer(map);
     pendingSafetyAction = meetingMap ? "meet" : "perimeter";
     stabilizeMapLayout(map);
-    setSafetyStatus(pendingSafetyAction === "meet" ? "Toca el mapa para fijar el punto de encuentro." : "Toca el mapa para centrar el perímetro.");
+    setSafetyStatus(pendingSafetyAction === "meet" ? "Toca el mapa para fijar el punto de encuentro." : "Toca el mapa para dibujar el centro del perímetro.");
   }, { capture: true });
 }
 
@@ -231,14 +234,14 @@ function installSafetyMapClick(map) {
     if (pendingSafetyAction === "meet") {
       sendSafetyMessage("meet", lat, lng);
       renderSafetyMeetingPoint({ lat, lng });
-      setSafetyStatus("Punto de encuentro enviado a la sala.");
+      setSafetyStatus("Punto de encuentro dibujado y enviado a la sala.");
     }
 
     if (pendingSafetyAction === "perimeter") {
       const radius = selectedPerimeterRadius();
       sendSafetyMessage("perimeter", lat, lng, radius);
-      renderSafetyPerimeter({ lat, lng, radius });
-      setSafetyStatus(`Perímetro enviado a la sala: ${radius} m.`);
+      const drawn = renderSafetyPerimeter({ lat, lng, radius });
+      setSafetyStatus(drawn ? `Perímetro dibujado: centro marcado y zona de ${radius} m.` : "No se pudo dibujar el perímetro en este mapa.");
     }
 
     pendingSafetyAction = "";
@@ -308,28 +311,28 @@ function renderLocalPosition(position) {
 }
 
 function renderSafetyMeetingPoint(point) {
-  const map = currentMap();
-  if (!map || !window.L || !validLatLng(point)) return;
-  const latLng = [Number(point.lat), Number(point.lng)];
-  const icon = window.L.divIcon({ className: "", html: '<div class="meeting-marker">📍</div>', iconSize: [42, 42], iconAnchor: [21, 36], popupAnchor: [0, -34] });
-  if (safetyMeetingMarker) safetyMeetingMarker.setLatLng(latLng);
-  else safetyMeetingMarker = window.L.marker(latLng, { icon }).addTo(map);
-  safetyMeetingMarker.bindPopup("Punto de encuentro");
+  const drawer = currentZoneDrawer();
+  if (!drawer) return false;
+  return drawer.drawMeetingPoint(point);
 }
 
 function renderSafetyPerimeter(perimeter) {
-  const map = currentMap();
-  if (!map || !window.L || !validLatLng(perimeter)) return;
-  const radius = Number(perimeter.radius || perimeter.radiusMeters || selectedPerimeterRadius());
-  const latLng = [Number(perimeter.lat), Number(perimeter.lng)];
+  const drawer = currentZoneDrawer();
+  if (!drawer) return false;
+  return drawer.drawPerimeter(perimeter);
+}
 
-  if (safetyPerimeterCircle) {
-    safetyPerimeterCircle.setLatLng(latLng);
-    safetyPerimeterCircle.setRadius(radius);
-  } else {
-    safetyPerimeterCircle = window.L.circle(latLng, { radius, weight: 2, fillOpacity: 0.08 }).addTo(map);
+function ensureZoneDrawer(map) {
+  if (!map || !window.L) return null;
+  if (!zoneDrawers.has(map)) {
+    zoneDrawers.set(map, attachMapZoneDrawer(map, window.L));
   }
-  safetyPerimeterCircle.bindPopup(`Perímetro: ${radius} m`);
+  return zoneDrawers.get(map);
+}
+
+function currentZoneDrawer() {
+  const map = currentMap();
+  return map ? ensureZoneDrawer(map) : null;
 }
 
 function showJoinCardAgain() {
@@ -389,12 +392,6 @@ function selectedPerimeterRadius() {
 function setSafetyStatus(message) {
   const status = document.querySelector("#safety-status") || document.querySelector("#room-status") || document.querySelector("#status");
   if (status) status.textContent = message;
-}
-
-function validLatLng(value) {
-  const lat = Number(value?.lat);
-  const lng = Number(value?.lng);
-  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
 function markRoomEnded(roomID) {
