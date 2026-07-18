@@ -1,11 +1,53 @@
 const capturedMaps = [];
 let localMarker = null;
 let localPosition = null;
+let activeSocket = null;
+let pendingSafetyAction = "";
+let safetyMeetingMarker = null;
+let safetyPerimeterCircle = null;
+let markerSpreadCounter = 0;
 
+installLeafletMarkerSpread();
 installLeafletMapCapture();
 installGeolocationCapture();
 installWebSocketDiagnostics();
 installRoomEndHandler();
+installSafetyControls();
+
+function installLeafletMarkerSpread() {
+  if (!window.L || typeof window.L.marker !== "function" || window.L.__lastSeenMarkerSpreadInstalled) return;
+  window.L.__lastSeenMarkerSpreadInstalled = true;
+
+  const nativeMarker = window.L.marker.bind(window.L);
+  window.L.marker = (latLng, options = {}) => {
+    const isMemberMarker = String(options?.icon?.options?.html || "").includes("member-marker");
+    const marker = nativeMarker(isMemberMarker ? spreadLatLng(latLng, markerSpreadCounter) : latLng, options);
+
+    if (isMemberMarker) {
+      marker.__lastSeenSpreadIndex = markerSpreadCounter;
+      markerSpreadCounter += 1;
+      const nativeSetLatLng = marker.setLatLng.bind(marker);
+      marker.setLatLng = nextLatLng => nativeSetLatLng(spreadLatLng(nextLatLng, marker.__lastSeenSpreadIndex));
+    }
+
+    return marker;
+  };
+}
+
+function spreadLatLng(latLng, index) {
+  const point = Array.isArray(latLng) ? { lat: Number(latLng[0]), lng: Number(latLng[1]) } : { lat: Number(latLng?.lat), lng: Number(latLng?.lng) };
+  if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return latLng;
+
+  const ring = Math.floor(index / 8);
+  const slot = index % 8;
+  const radiusMeters = ring === 0 ? 0 : 7 + ring * 4;
+  if (radiusMeters === 0) return [point.lat, point.lng];
+
+  const angle = (Math.PI * 2 * slot) / 8;
+  const latOffset = (Math.sin(angle) * radiusMeters) / 111320;
+  const lngOffset = (Math.cos(angle) * radiusMeters) / (111320 * Math.cos(point.lat * Math.PI / 180));
+  return [roundCoord(point.lat + latOffset), roundCoord(point.lng + lngOffset)];
+}
 
 function installLeafletMapCapture() {
   if (!window.L || typeof window.L.map !== "function") return;
@@ -18,6 +60,7 @@ function installLeafletMapCapture() {
     capturedMaps.push(map);
     window.__lastSeenMap = map;
     stabilizeMapLayout(map);
+    installSafetyMapClick(map);
     if (localPosition) renderLocalPosition(localPosition);
     return map;
   };
@@ -55,8 +98,13 @@ function installWebSocketDiagnostics() {
 
   function PatchedWebSocket(url, protocols) {
     const socket = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
+    activeSocket = socket;
+    window.__lastSeenSocket = socket;
+
     socket.addEventListener("message", event => {
       const msg = safeJSON(event.data);
+      if (msg?.t === "meet" && msg.d) renderSafetyMeetingPoint(msg.d);
+      if (msg?.t === "perimeter" && msg.d) renderSafetyPerimeter(msg.d);
       if (msg?.t !== "error") return;
 
       const code = msg.d?.code || "join_failed";
@@ -69,6 +117,8 @@ function installWebSocketDiagnostics() {
       if (status) status.textContent = msg.d?.message || "No se pudo entrar en la sala.";
     });
     socket.addEventListener("close", event => {
+      if (activeSocket === socket) activeSocket = null;
+      if (window.__lastSeenSocket === socket) window.__lastSeenSocket = null;
       if (window.__lastSeenExpectedSocketClose || window.__lastSeenRoomEnding) return;
       const status = document.querySelector("#room-status") || document.querySelector("#status");
       if (!status) return;
@@ -141,11 +191,78 @@ function installRoomEndHandler() {
   }, { capture: true });
 }
 
+function installSafetyControls() {
+  document.addEventListener("click", event => {
+    const meetingHere = event.target?.closest?.("#set-meeting-here");
+    const meetingMap = event.target?.closest?.("#set-meeting-map");
+    const perimeterMap = event.target?.closest?.("#set-perimeter-map");
+
+    if (!meetingHere && !meetingMap && !perimeterMap) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (meetingHere) {
+      const coords = localCoords();
+      if (!coords) return setSafetyStatus("Aún no tengo tu ubicación para fijar el punto aquí.");
+      sendSafetyMessage("meet", coords.lat, coords.lng);
+      renderSafetyMeetingPoint({ lat: coords.lat, lng: coords.lng });
+      setSafetyStatus("Punto de encuentro fijado en tu ubicación actual.");
+      return;
+    }
+
+    const map = currentMap();
+    if (!map) return setSafetyStatus("Abre el mapa antes de fijar puntos de seguridad.");
+    pendingSafetyAction = meetingMap ? "meet" : "perimeter";
+    stabilizeMapLayout(map);
+    setSafetyStatus(pendingSafetyAction === "meet" ? "Toca el mapa para fijar el punto de encuentro." : "Toca el mapa para centrar el perímetro.");
+  }, { capture: true });
+}
+
+function installSafetyMapClick(map) {
+  if (!map || map.__lastSeenSafetyClickInstalled) return;
+  map.__lastSeenSafetyClickInstalled = true;
+
+  map.on("click", event => {
+    if (!pendingSafetyAction) return;
+    const lat = roundCoord(event.latlng.lat);
+    const lng = roundCoord(event.latlng.lng);
+
+    if (pendingSafetyAction === "meet") {
+      sendSafetyMessage("meet", lat, lng);
+      renderSafetyMeetingPoint({ lat, lng });
+      setSafetyStatus("Punto de encuentro enviado a la sala.");
+    }
+
+    if (pendingSafetyAction === "perimeter") {
+      const radius = selectedPerimeterRadius();
+      sendSafetyMessage("perimeter", lat, lng, radius);
+      renderSafetyPerimeter({ lat, lng, radius });
+      setSafetyStatus(`Perímetro enviado a la sala: ${radius} m.`);
+    }
+
+    pendingSafetyAction = "";
+  });
+}
+
+function sendSafetyMessage(type, lat, lng, radius) {
+  const socket = activeSocket || window.__lastSeenSocket;
+  if (!socket || socket.readyState !== window.WebSocket.OPEN) {
+    setSafetyStatus("Conecta con la sala antes de fijar puntos de seguridad.");
+    return false;
+  }
+
+  const payload = { t: type, lat: roundCoord(lat), lng: roundCoord(lng) };
+  if (type === "perimeter") payload.radius = radius;
+  socket.send(JSON.stringify(payload));
+  return true;
+}
+
 function renderLocalPosition(position) {
   if (!position?.coords) return;
 
   localPosition = position;
-  const map = window.__lastSeenMap || capturedMaps[capturedMaps.length - 1];
+  const map = currentMap();
   const state = readRoomState();
   const lat = roundCoord(position.coords.latitude);
   const lng = roundCoord(position.coords.longitude);
@@ -190,6 +307,31 @@ function renderLocalPosition(position) {
   }
 }
 
+function renderSafetyMeetingPoint(point) {
+  const map = currentMap();
+  if (!map || !window.L || !validLatLng(point)) return;
+  const latLng = [Number(point.lat), Number(point.lng)];
+  const icon = window.L.divIcon({ className: "", html: '<div class="meeting-marker">📍</div>', iconSize: [42, 42], iconAnchor: [21, 36], popupAnchor: [0, -34] });
+  if (safetyMeetingMarker) safetyMeetingMarker.setLatLng(latLng);
+  else safetyMeetingMarker = window.L.marker(latLng, { icon }).addTo(map);
+  safetyMeetingMarker.bindPopup("Punto de encuentro");
+}
+
+function renderSafetyPerimeter(perimeter) {
+  const map = currentMap();
+  if (!map || !window.L || !validLatLng(perimeter)) return;
+  const radius = Number(perimeter.radius || perimeter.radiusMeters || selectedPerimeterRadius());
+  const latLng = [Number(perimeter.lat), Number(perimeter.lng)];
+
+  if (safetyPerimeterCircle) {
+    safetyPerimeterCircle.setLatLng(latLng);
+    safetyPerimeterCircle.setRadius(radius);
+  } else {
+    safetyPerimeterCircle = window.L.circle(latLng, { radius, weight: 2, fillOpacity: 0.08 }).addTo(map);
+  }
+  safetyPerimeterCircle.bindPopup(`Perímetro: ${radius} m`);
+}
+
 function showJoinCardAgain() {
   const joinCard = document.querySelector("#join-card");
   const roomCard = document.querySelector("#room-card");
@@ -225,6 +367,34 @@ function renderLocalMemberRow(member) {
 
 function stabilizeMapLayout(map) {
   [50, 150, 350, 800].forEach(delay => setTimeout(() => map.invalidateSize(), delay));
+}
+
+function currentMap() {
+  return window.__lastSeenMap || capturedMaps[capturedMaps.length - 1] || null;
+}
+
+function localCoords() {
+  if (!localPosition?.coords) return null;
+  return {
+    lat: roundCoord(localPosition.coords.latitude),
+    lng: roundCoord(localPosition.coords.longitude)
+  };
+}
+
+function selectedPerimeterRadius() {
+  const value = Number(document.querySelector("#perimeter-radius")?.value || 250);
+  return Number.isFinite(value) ? Math.max(50, Math.min(5000, value)) : 250;
+}
+
+function setSafetyStatus(message) {
+  const status = document.querySelector("#safety-status") || document.querySelector("#room-status") || document.querySelector("#status");
+  if (status) status.textContent = message;
+}
+
+function validLatLng(value) {
+  const lat = Number(value?.lat);
+  const lng = Number(value?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
 function markRoomEnded(roomID) {
