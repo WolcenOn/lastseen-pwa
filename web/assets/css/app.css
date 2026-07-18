@@ -207,6 +207,31 @@ button.danger, .button-like.danger { background: #fb7185; color: #450a0a; }
 .member-marker.offline { border-color: #fb923c; opacity: 0.72; }
 .member-marker.alert { border-color: #fb7185; box-shadow: 0 0 0 6px rgba(251, 113, 133, 0.22), 0 12px 28px rgba(2, 6, 23, 0.36); }
 .meeting-marker { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: #facc15; border: 3px solid #713f12; box-shadow: 0 12px 28px rgba(2, 6, 23, 0.36); font-size: 1.3rem; }
+.zone-marker { position: relative; z-index: 900; }
+.perimeter-center-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 72px;
+  height: 34px;
+  border: 3px solid #0f172a;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45), 0 0 0 5px rgba(34, 197, 94, 0.28);
+  color: #052e16;
+  font-size: 1rem;
+  font-weight: 900;
+}
+.perimeter-center-marker span { font-size: 0.7rem; line-height: 1; white-space: nowrap; }
+.lastseen-perimeter-zone {
+  stroke: #22c55e;
+  stroke-width: 4px;
+  stroke-opacity: 0.95;
+  fill: #22c55e;
+  fill-opacity: 0.18;
+  filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.55));
+}
 
 .safety-panel summary { cursor: pointer; font-weight: 900; color: #e0f2fe; }
 .premium-pill { display: inline-flex; margin-left: 6px; border-radius: 999px; padding: 3px 8px; background: rgba(250, 204, 21, 0.16); color: #fde68a; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; }
