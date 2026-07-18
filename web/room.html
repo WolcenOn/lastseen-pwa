@@ -62,14 +62,8 @@
             <button id="fit-map" class="secondary" type="button">Ver grupo</button>
             <button id="set-meeting-here" class="secondary" type="button">Punto aquí</button>
             <button id="set-meeting-map" class="secondary" type="button">Punto en mapa</button>
-          </div>
-          <p id="map-help" class="hint">Los avatares muestran la última ubicación recibida. El historial local se revisa desde la pantalla de inicio.</p>
-        </section>
-        <details class="safety-panel">
-          <summary>Opciones de seguridad <span class="premium-pill">premium-ready</span></summary>
-          <div class="safety-grid">
-            <label for="perimeter-radius">Perímetro</label>
-            <select id="perimeter-radius">
+            <label class="compact-label" for="perimeter-radius">Radio</label>
+            <select id="perimeter-radius" aria-label="Radio del perímetro">
               <option value="100">100 m</option>
               <option value="250" selected>250 m</option>
               <option value="500">500 m</option>
@@ -77,6 +71,10 @@
             </select>
             <button id="set-perimeter-map" class="secondary" type="button">Dibujar perímetro</button>
           </div>
+          <p id="map-help" class="hint">Para crear un perímetro, elige radio, pulsa “Dibujar perímetro” y toca el centro en el mapa.</p>
+        </section>
+        <details class="safety-panel">
+          <summary>Opciones de seguridad <span class="premium-pill">premium-ready</span></summary>
           <div class="safety-grid">
             <label for="inactivity-minutes">Alerta de inactividad local</label>
             <select id="inactivity-minutes">
@@ -87,7 +85,7 @@
             </select>
             <button id="check-inactivity" class="secondary" type="button">Revisar ahora</button>
           </div>
-          <p id="safety-status" class="hint">Base premium: perímetro, inactividad, pánico y rescate quedan preparados sin guardar datos persistentes en servidor.</p>
+          <p id="safety-status" class="hint">Perímetro, inactividad, pánico y rescate quedan preparados sin guardar datos persistentes en servidor.</p>
         </details>
         <div id="members" class="member-list"></div>
         <button id="leave-room" class="danger" type="button">Salir</button>
