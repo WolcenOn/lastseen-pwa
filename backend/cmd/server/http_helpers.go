@@ -8,7 +8,7 @@ import (
 )
 
 var defaultAllowedOrigins = map[string]bool{
-	"https://wolcenon.github.io":                         true,
+	"https://wolcenon.github.io":                     true,
 	"https://lastseen-pwa-production.up.railway.app": true,
 }
 
