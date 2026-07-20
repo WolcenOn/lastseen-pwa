@@ -69,6 +69,7 @@ type websocketJoinClaims struct {
 	Nickname  string
 	PIN       string
 	Avatar    string
+	Role      string
 	ExpiresAt time.Time
 }
 
@@ -190,6 +191,7 @@ func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handle
 			Nickname: nickname,
 			PIN:      pin,
 			Avatar:   avatar,
+			Role:     role,
 		}
 		wsToken, claims, err := tokens.Issue(claims)
 		if err != nil {
@@ -248,7 +250,7 @@ func websocketHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handl
 			return
 		}
 
-		nickname, pin, avatar, clientID, ok := websocketJoinIdentity(r, tokens, roomID)
+		nickname, pin, avatar, clientID, role, ok := websocketJoinIdentity(r, tokens, roomID)
 		if !ok {
 			http.Error(w, "invalid websocket token or join parameters", http.StatusUnauthorized)
 			return
@@ -272,6 +274,7 @@ func websocketHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handl
 			Nickname:  nickname,
 			PIN:       pin,
 			Avatar:    avatar,
+			Role:      role,
 			Conn:      conn,
 		})
 		if err := hub.JoinRoom(roomID, client); err != nil {
@@ -285,13 +288,13 @@ func websocketHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handl
 	}
 }
 
-func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID string) (string, string, string, string, bool) {
+func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID string) (string, string, string, string, string, bool) {
 	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
 		claims, ok := tokens.Consume(token, roomID)
 		if !ok {
-			return "", "", "", "", false
+			return "", "", "", "", "", false
 		}
-		return claims.Nickname, claims.PIN, claims.Avatar, claims.ClientID, true
+		return claims.Nickname, claims.PIN, claims.Avatar, claims.ClientID, claims.Role, true
 	}
 
 	nickname := sanitizeNickname(r.URL.Query().Get("nick"))
@@ -300,7 +303,7 @@ func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID 
 	clientID := sanitizeClientID(r.URL.Query().Get("id"))
 
 	if nickname == "" || !pinPattern.MatchString(pin) {
-		return "", "", "", "", false
+		return "", "", "", "", "", false
 	}
 	if avatar == "" {
 		avatar = avatarSet[0]
@@ -309,11 +312,11 @@ func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID 
 		var err error
 		clientID, err = randomURLSafe(9)
 		if err != nil {
-			return "", "", "", "", false
+			return "", "", "", "", "", false
 		}
 	}
 
-	return nickname, pin, avatar, clientID, true
+	return nickname, pin, avatar, clientID, realtime.ClientRoleParticipant, true
 }
 
 func joinErrorMessage(err error) realtime.OutboundMessage {
