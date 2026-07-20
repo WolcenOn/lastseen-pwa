@@ -26,10 +26,11 @@ var upgrader = websocket.Upgrader{
 }
 
 type joinRoomRequest struct {
-	Nickname string `json:"nickname"`
-	PIN      string `json:"pin"`
-	Avatar   string `json:"avatar"`
-	ClientID string `json:"clientId"`
+	Nickname     string `json:"nickname"`
+	PIN          string `json:"pin"`
+	Avatar       string `json:"avatar"`
+	ClientID     string `json:"clientId"`
+	CreatorToken string `json:"creatorToken"`
 }
 
 type joinRoomResponse struct {
@@ -39,6 +40,8 @@ type joinRoomResponse struct {
 	WebSocketToken  string              `json:"wsToken"`
 	TokenExpiresIn  int64               `json:"tokenExpiresIn"`
 	ProtocolVersion string              `json:"protocolVersion"`
+	Role            string              `json:"role"`
+	Capabilities    joinCapabilities    `json:"capabilities"`
 	Features        map[string]bool     `json:"features"`
 }
 
@@ -46,6 +49,18 @@ type joinClientResponse struct {
 	ID       string `json:"id"`
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`
+}
+
+type joinCapabilities struct {
+	CanViewRoom         bool `json:"canViewRoom"`
+	CanShareLocation    bool `json:"canShareLocation"`
+	CanSendSOS          bool `json:"canSendSOS"`
+	CanSendPanic        bool `json:"canSendPanic"`
+	CanWakeParticipants bool `json:"canWakeParticipants"`
+	CanSetMeetingPoint  bool `json:"canSetMeetingPoint"`
+	CanSetPerimeter     bool `json:"canSetPerimeter"`
+	CanUpdateTTL        bool `json:"canUpdateTTL"`
+	CanEndRoom          bool `json:"canEndRoom"`
 }
 
 type websocketJoinClaims struct {
@@ -132,6 +147,10 @@ func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handle
 		pin := strings.TrimSpace(payload.PIN)
 		avatar := sanitizeAvatar(payload.Avatar)
 		clientID := sanitizeClientID(payload.ClientID)
+		creatorToken := strings.TrimSpace(payload.CreatorToken)
+		if creatorToken == "" {
+			creatorToken = strings.TrimSpace(r.Header.Get("X-Creator-Token"))
+		}
 
 		if nickname == "" {
 			http.Error(w, "missing nickname", http.StatusBadRequest)
@@ -154,6 +173,12 @@ func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handle
 		}
 
 		room, err := hub.PrepareJoin(roomID, clientID, nickname)
+		if err != nil {
+			writeJoinHTTPError(w, err)
+			return
+		}
+
+		role, err := hub.ClientRole(roomID, creatorToken)
 		if err != nil {
 			writeJoinHTTPError(w, err)
 			return
@@ -183,14 +208,36 @@ func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handle
 			WebSocketToken:  wsToken,
 			TokenExpiresIn:  int64(time.Until(claims.ExpiresAt).Seconds()),
 			ProtocolVersion: protocolVersion,
+			Role:            role,
+			Capabilities:    capabilitiesForRole(role),
 			Features: map[string]bool{
 				"backgroundNativeTracking": true,
 				"foregroundPWA":            true,
+				"roles":                    true,
 				"safetyEvents":             true,
 				"wsToken":                  true,
 			},
 		})
 	}
+}
+
+func capabilitiesForRole(role string) joinCapabilities {
+	capabilities := joinCapabilities{
+		CanViewRoom:         true,
+		CanShareLocation:    true,
+		CanSendSOS:          true,
+		CanSendPanic:        true,
+		CanWakeParticipants: true,
+	}
+
+	if role == realtime.ClientRoleCreator {
+		capabilities.CanSetMeetingPoint = true
+		capabilities.CanSetPerimeter = true
+		capabilities.CanUpdateTTL = true
+		capabilities.CanEndRoom = true
+	}
+
+	return capabilities
 }
 
 func websocketHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.HandlerFunc {
