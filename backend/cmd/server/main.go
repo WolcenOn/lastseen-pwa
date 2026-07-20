@@ -66,12 +66,12 @@ type joinRoomRequest struct {
 
 type joinRoomResponse struct {
 	Room            realtime.PublicRoom `json:"room"`
-	Client          joinClientResponse   `json:"client"`
-	WebSocketURL     string               `json:"wsUrl"`
-	WebSocketToken   string               `json:"wsToken"`
-	TokenExpiresIn   int64                `json:"tokenExpiresIn"`
-	ProtocolVersion string               `json:"protocolVersion"`
-	Features        map[string]bool      `json:"features"`
+	Client          joinClientResponse  `json:"client"`
+	WebSocketURL    string              `json:"wsUrl"`
+	WebSocketToken  string              `json:"wsToken"`
+	TokenExpiresIn  int64               `json:"tokenExpiresIn"`
+	ProtocolVersion string              `json:"protocolVersion"`
+	Features        map[string]bool     `json:"features"`
 }
 
 type joinClientResponse struct {
@@ -473,6 +473,7 @@ func joinErrorMessage(err error) realtime.OutboundMessage {
 			},
 		}
 	}
+
 	return realtime.OutboundMessage{
 		Type: "error",
 		Data: map[string]string{
