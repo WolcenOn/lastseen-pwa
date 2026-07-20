@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -29,6 +30,7 @@ const (
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	backendVersion    = "2026-07-16-railway-cache-bust"
+	protocolVersion   = "lastseen-v1"
 )
 
 var (
@@ -51,6 +53,27 @@ var upgrader = websocket.Upgrader{
 type createRoomRequest struct {
 	Name       string `json:"name"`
 	TTLMinutes int    `json:"ttlMinutes"`
+}
+
+type joinRoomRequest struct {
+	Nickname string `json:"nickname"`
+	PIN      string `json:"pin"`
+	Avatar   string `json:"avatar"`
+	ClientID string `json:"clientId"`
+}
+
+type joinRoomResponse struct {
+	Room            realtime.PublicRoom `json:"room"`
+	Client          joinClientResponse   `json:"client"`
+	WebSocketURL     string               `json:"wsUrl"`
+	ProtocolVersion string               `json:"protocolVersion"`
+	Features        map[string]bool      `json:"features"`
+}
+
+type joinClientResponse struct {
+	ID       string `json:"id"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
 }
 
 type updateRoomRequest struct {
@@ -79,6 +102,7 @@ func main() {
 	mux.HandleFunc("GET /api/health", healthHandler)
 	mux.HandleFunc("POST /api/rooms", createRoomHandler(hub))
 	mux.HandleFunc("GET /api/rooms/{roomID}", roomInfoHandler(hub))
+	mux.HandleFunc("POST /api/rooms/{roomID}/join", joinRoomHandler(hub))
 	mux.HandleFunc("PATCH /api/rooms/{roomID}", updateRoomHandler(hub))
 	mux.HandleFunc("DELETE /api/rooms/{roomID}", deleteRoomHandler(hub))
 	mux.HandleFunc("GET /ws/rooms/{roomID}", websocketHandler(hub))
@@ -117,11 +141,14 @@ func main() {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-LastSeen-Version", backendVersion)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"version": backendVersion,
+		"status":          "ok",
+		"version":         backendVersion,
+		"protocolVersion": protocolVersion,
 		"features": map[string]bool{
 			"creatorToken":        true,
 			"participantSnapshot": true,
+			"joinContract":        true,
+			"nativeClients":       true,
 		},
 	})
 }
@@ -177,6 +204,68 @@ func roomInfoHandler(hub *realtime.Hub) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, room)
+	}
+}
+
+func joinRoomHandler(hub *realtime.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		roomID := r.PathValue("roomID")
+		if roomID == "" {
+			http.Error(w, "missing room id", http.StatusBadRequest)
+			return
+		}
+
+		var payload joinRoomRequest
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+		}
+
+		nickname := sanitizeNickname(payload.Nickname)
+		pin := strings.TrimSpace(payload.PIN)
+		avatar := sanitizeAvatar(payload.Avatar)
+		clientID := sanitizeClientID(payload.ClientID)
+
+		if nickname == "" {
+			http.Error(w, "missing nickname", http.StatusBadRequest)
+			return
+		}
+		if !pinPattern.MatchString(pin) {
+			http.Error(w, "invalid pin", http.StatusBadRequest)
+			return
+		}
+		if avatar == "" {
+			avatar = avatarSet[0]
+		}
+		if clientID == "" {
+			var err error
+			clientID, err = randomURLSafe(9)
+			if err != nil {
+				http.Error(w, "failed to create client", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		room, err := hub.PrepareJoin(roomID, clientID, nickname)
+		if err != nil {
+			writeJoinHTTPError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, joinRoomResponse{
+			Room: room,
+			Client: joinClientResponse{
+				ID:       clientID,
+				Nickname: nickname,
+				Avatar:   avatar,
+			},
+			WebSocketURL:     websocketJoinURL(r, roomID, nickname, pin, avatar, clientID),
+			ProtocolVersion: protocolVersion,
+			Features: map[string]bool{
+				"backgroundNativeTracking": true,
+				"foregroundPWA":            true,
+				"safetyEvents":             true,
+			},
+		})
 	}
 }
 
@@ -279,6 +368,21 @@ func joinErrorMessage(err error) realtime.OutboundMessage {
 	return realtime.OutboundMessage{Type: "error", Data: map[string]string{"code": "join_failed", "message": err.Error()}}
 }
 
+func writeJoinHTTPError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, realtime.ErrRoomNotFound):
+		http.Error(w, "room not found", http.StatusNotFound)
+	case errors.Is(err, realtime.ErrNicknameTaken):
+		http.Error(w, "nickname_taken", http.StatusConflict)
+	case errors.Is(err, realtime.ErrRoomFull):
+		http.Error(w, "room_full", http.StatusTooManyRequests)
+	case errors.Is(err, realtime.ErrRoomClosed):
+		http.Error(w, "room_closed", http.StatusGone)
+	default:
+		http.Error(w, "join_failed", http.StatusInternalServerError)
+	}
+}
+
 func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err error) {
 	if err == nil {
 		writeJSON(w, http.StatusOK, public)
@@ -295,6 +399,31 @@ func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err
 	default:
 		http.Error(w, "room update failed", http.StatusInternalServerError)
 	}
+}
+
+func websocketJoinURL(r *http.Request, roomID string, nickname string, pin string, avatar string, clientID string) string {
+	scheme := "ws"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "wss"
+	}
+
+	host := r.Host
+	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
+		host = forwardedHost
+	}
+
+	values := url.Values{}
+	values.Set("nick", nickname)
+	values.Set("pin", pin)
+	values.Set("avatar", avatar)
+	values.Set("id", clientID)
+
+	return (&url.URL{
+		Scheme:   scheme,
+		Host:     host,
+		Path:     "/ws/rooms/" + roomID,
+		RawQuery: values.Encode(),
+	}).String()
 }
 
 func resolveAddr() string {
