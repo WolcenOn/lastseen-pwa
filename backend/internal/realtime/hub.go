@@ -94,6 +94,18 @@ func (h *Hub) RoomInfo(id string) (PublicRoom, bool) {
 	return room.Public(time.Now().UTC()), true
 }
 
+func (h *Hub) PrepareJoin(roomID string, clientID string, nickname string) (PublicRoom, error) {
+	room, ok := h.GetRoom(roomID)
+	if !ok {
+		return PublicRoom{}, ErrRoomNotFound
+	}
+	if err := room.CanJoin(clientID, nickname); err != nil {
+		return PublicRoom{}, err
+	}
+
+	return room.Public(time.Now().UTC()), nil
+}
+
 func (h *Hub) JoinRoom(roomID string, client *Client) error {
 	room, ok := h.GetRoom(roomID)
 	if !ok {
