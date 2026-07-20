@@ -184,13 +184,15 @@ Recommended native-client connection:
 GET /ws/rooms/{roomID}?token={wsToken}
 ```
 
-The token is short-lived, single-use, and scoped to the room. It carries the sanitized join identity prepared by `POST /api/rooms/{roomID}/join`.
+The token is short-lived, single-use, and scoped to the room. It carries the sanitized join identity and resolved role prepared by `POST /api/rooms/{roomID}/join`.
 
 Existing PWA-compatible connection remains supported during migration:
 
 ```http
 GET /ws/rooms/{roomID}?nick={nickname}&pin={pin}&avatar={avatar}&id={clientId}
 ```
+
+Legacy query-parameter WebSocket joins always connect as `participant` because they do not carry a verified role. The PWA migration bridge should call `POST /join` and include `creatorToken` when the local room state has one.
 
 The backend sends a `snapshot` immediately after a successful join.
 
@@ -210,14 +212,30 @@ The backend sends a `snapshot` immediately after a successful join.
 
 ### Meeting point
 
+Requires `canSetMeetingPoint`.
+
 ```json
 { "t": "meet", "lat": 37.2501, "lng": -6.9501 }
 ```
 
+Unauthorized clients receive:
+
+```json
+{ "t": "error", "d": { "code": "set_meeting_point_forbidden", "message": "No tienes permiso para cambiar el punto de encuentro." } }
+```
+
 ### Perimeter
+
+Requires `canSetPerimeter`.
 
 ```json
 { "t": "perimeter", "lat": 37.2501, "lng": -6.9501, "radius": 250 }
+```
+
+Unauthorized clients receive:
+
+```json
+{ "t": "error", "d": { "code": "set_perimeter_forbidden", "message": "No tienes permiso para cambiar el perímetro." } }
 ```
 
 ### Wake participant
@@ -283,4 +301,4 @@ POST /api/rooms/{roomID}/join
 GET /ws/rooms/{roomID}?token={wsToken}
 ```
 
-Role/capability information is now available in the join response. Enforcement of WebSocket actions should be introduced progressively so existing PWA behaviour can be migrated safely instead of broken abruptly.
+Role/capability information is now enforced for safety-changing WebSocket actions. Clients should not render unavailable controls when the matching capability is false, and the backend will still reject unauthorized messages if a client sends them.
