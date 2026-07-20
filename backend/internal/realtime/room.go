@@ -77,6 +77,36 @@ func (r *Room) Public(now time.Time) PublicRoom {
 	}
 }
 
+func (r *Room) CanJoin(clientID string, nickname string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.Closed || r.remainingLocked(time.Now().UTC()) <= 0 {
+		return ErrRoomClosed
+	}
+
+	_, reconnecting := r.clients[clientID]
+	if !reconnecting && r.nicknameTakenLocked(clientID, nickname) {
+		return ErrNicknameTaken
+	}
+
+	activeCount := 0
+	for id, client := range r.clients {
+		if id == clientID {
+			continue
+		}
+		if client.Connected {
+			activeCount++
+		}
+	}
+
+	if !reconnecting && activeCount >= r.MaxFreeClients {
+		return ErrRoomFull
+	}
+
+	return nil
+}
+
 func (r *Room) AddClient(client *Client) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
