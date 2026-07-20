@@ -26,8 +26,10 @@ Response:
   "features": {
     "creatorToken": true,
     "participantSnapshot": true,
+    "joinCapabilities": true,
     "joinContract": true,
     "nativeClients": true,
+    "roles": true,
     "wsToken": true
   }
 }
@@ -85,11 +87,14 @@ Request:
   "nickname": "Virginia",
   "pin": "1234",
   "avatar": "🦊",
-  "clientId": "stable-client-id"
+  "clientId": "stable-client-id",
+  "creatorToken": "creator-secret-if-this-client-created-the-room"
 }
 ```
 
 `clientId` is optional. If it is missing or invalid, the backend returns a valid generated client id.
+
+`creatorToken` is optional. If it matches the room creator token, the backend assigns the `creator` role. Otherwise, the client joins as `participant`.
 
 Response:
 
@@ -113,16 +118,29 @@ Response:
   "wsToken": "short-lived-token",
   "tokenExpiresIn": 119,
   "protocolVersion": "lastseen-v2",
+  "role": "creator",
+  "capabilities": {
+    "canViewRoom": true,
+    "canShareLocation": true,
+    "canSendSOS": true,
+    "canSendPanic": true,
+    "canWakeParticipants": true,
+    "canSetMeetingPoint": true,
+    "canSetPerimeter": true,
+    "canUpdateTTL": true,
+    "canEndRoom": true
+  },
   "features": {
     "backgroundNativeTracking": true,
     "foregroundPWA": true,
+    "roles": true,
     "safetyEvents": true,
     "wsToken": true
   }
 }
 ```
 
-The join endpoint is a preflight contract. It validates the current room and nickname rules, then issues a short-lived single-use WebSocket token. The WebSocket join remains the final source of truth because another client could join between the preflight response and the socket connection.
+The join endpoint is a preflight contract. It validates the current room and nickname rules, resolves the role/capabilities, then issues a short-lived single-use WebSocket token. The WebSocket join remains the final source of truth because another client could join between the preflight response and the socket connection.
 
 Common error responses:
 
@@ -132,6 +150,31 @@ Common error responses:
 - `409 nickname_taken`
 - `410 room_closed`
 - `429 room_full`
+
+## Roles and capabilities
+
+Roles are backend-owned and returned by `POST /api/rooms/{roomID}/join`.
+
+Current roles:
+
+- `creator`: client that presents a valid room creator token.
+- `participant`: default client role.
+
+Current capabilities:
+
+| Capability | Creator | Participant |
+| --- | --- | --- |
+| `canViewRoom` | yes | yes |
+| `canShareLocation` | yes | yes |
+| `canSendSOS` | yes | yes |
+| `canSendPanic` | yes | yes |
+| `canWakeParticipants` | yes | yes |
+| `canSetMeetingPoint` | yes | no |
+| `canSetPerimeter` | yes | no |
+| `canUpdateTTL` | yes | no |
+| `canEndRoom` | yes | no |
+
+The PWA should progressively move from local UI decisions to these backend capabilities. Native clients should treat `capabilities` as the source of truth for available actions.
 
 ## WebSocket join
 
@@ -218,13 +261,14 @@ A native client should:
 
 1. Store a stable `clientId` per room/device.
 2. Call `POST /api/rooms/{roomID}/join`.
-3. Open the returned `wsUrl` with the short-lived `token`.
-4. Start a foreground location service only after user consent.
-5. Keep a persistent notification while sharing location.
-6. Send `loc` messages from the service.
-7. Reconnect WebSocket when coverage returns by requesting a fresh join token.
-8. Re-send the latest known location after reconnect.
-9. Stop tracking when the user leaves the room or the operation ends.
+3. Read `role` and `capabilities` from the join response.
+4. Open the returned `wsUrl` with the short-lived `token`.
+5. Start a foreground location service only after user consent.
+6. Keep a persistent notification while sharing location.
+7. Send `loc` messages from the service.
+8. Reconnect WebSocket when coverage returns by requesting a fresh join token.
+9. Re-send the latest known location after reconnect.
+10. Stop tracking when the user leaves the room or the operation ends.
 
 ## Current security note
 
@@ -238,3 +282,5 @@ POST /api/rooms/{roomID}/join
 
 GET /ws/rooms/{roomID}?token={wsToken}
 ```
+
+Role/capability information is now available in the join response. Enforcement of WebSocket actions should be introduced progressively so existing PWA behaviour can be migrated safely instead of broken abruptly.
