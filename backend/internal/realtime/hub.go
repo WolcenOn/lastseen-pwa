@@ -195,12 +195,30 @@ func (h *Hub) HandleClientMessage(roomID string, clientID string, msg InboundMes
 			room.Broadcast(OutboundMessage{Type: "leave", Data: map[string]string{"id": clientID}})
 		}
 	case "meet":
+		if !room.CanManageSafety(clientID) {
+			room.SendToClient(clientID, forbiddenMessage("set_meeting_point_forbidden", "No tienes permiso para cambiar el punto de encuentro."))
+			return
+		}
 		point := room.SetMeetingPoint(clientID, msg)
 		room.Broadcast(OutboundMessage{Type: "meet", Data: point})
 	case "perimeter":
+		if !room.CanManageSafety(clientID) {
+			room.SendToClient(clientID, forbiddenMessage("set_perimeter_forbidden", "No tienes permiso para cambiar el perímetro."))
+			return
+		}
 		perimeter := room.SetPerimeter(clientID, msg)
 		room.Broadcast(OutboundMessage{Type: "perimeter", Data: perimeter})
 		room.Broadcast(OutboundMessage{Type: "snapshot", Data: room.Snapshot()})
+	}
+}
+
+func forbiddenMessage(code string, message string) OutboundMessage {
+	return OutboundMessage{
+		Type: "error",
+		Data: map[string]string{
+			"code":    code,
+			"message": message,
+		},
 	}
 }
 
