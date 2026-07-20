@@ -324,7 +324,13 @@ func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.Handle
 			return
 		}
 
-		claims := websocketJoinClaims{RoomID: roomID, ClientID: clientID, Nickname: nickname, PIN: pin, Avatar: avatar}
+		claims := websocketJoinClaims{
+			RoomID:   roomID,
+			ClientID: clientID,
+			Nickname: nickname,
+			PIN:      pin,
+			Avatar:   avatar,
+		}
 		wsToken, claims, err := tokens.Issue(claims)
 		if err != nil {
 			http.Error(w, "failed to issue websocket token", http.StatusInternalServerError)
@@ -459,9 +465,21 @@ func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID 
 
 func joinErrorMessage(err error) realtime.OutboundMessage {
 	if errors.Is(err, realtime.ErrNicknameTaken) {
-		return realtime.OutboundMessage{Type: "error", Data: map[string]string{"code": "nickname_taken", "message": "Ese mote ya está en uso en esta sala. Elige otro."}}
+		return realtime.OutboundMessage{
+			Type: "error",
+			Data: map[string]string{
+				"code":    "nickname_taken",
+				"message": "Ese mote ya está en uso en esta sala. Elige otro.",
+			},
+		}
 	}
-	return realtime.OutboundMessage{Type: "error", Data: map[string]string{"code": "join_failed", "message": err.Error()}}
+	return realtime.OutboundMessage{
+		Type: "error",
+		Data: map[string]string{
+			"code":    "join_failed",
+			"message": err.Error(),
+		},
+	}
 }
 
 func writeJoinHTTPError(w http.ResponseWriter, err error) {
