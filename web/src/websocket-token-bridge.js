@@ -61,6 +61,41 @@ function readCreatorToken(roomID) {
   return "";
 }
 
+function persistJoinContract(roomID, contract) {
+  if (!roomID || !contract) return;
+
+  const publicContract = {
+    role: contract.role || "participant",
+    capabilities: contract.capabilities || {},
+    protocolVersion: contract.protocolVersion || "",
+    features: contract.features || {},
+    joinedAt: new Date().toISOString()
+  };
+
+  globalThis.__lastSeenJoinContract = { roomID, ...publicContract };
+
+  try {
+    const stateKey = `lastseen:${roomID}:state`;
+    const state = JSON.parse(globalThis.localStorage?.getItem(stateKey) || "{}");
+    state.role = publicContract.role;
+    state.capabilities = publicContract.capabilities;
+    state.protocolVersion = publicContract.protocolVersion || state.protocolVersion || "";
+    state.joinFeatures = publicContract.features;
+    state.lastJoinContractAt = publicContract.joinedAt;
+    globalThis.localStorage?.setItem(stateKey, JSON.stringify(state));
+  } catch {
+    // Capabilities are still dispatched even if storage is unavailable.
+  }
+
+  try {
+    globalThis.dispatchEvent(new CustomEvent("lastseen:join-contract", {
+      detail: { roomID, contract: publicContract }
+    }));
+  } catch {
+    // Older browsers may not support CustomEvent construction in every context.
+  }
+}
+
 function bridgeStatus(message) {
   const status = document.querySelector("#status");
   const roomStatus = document.querySelector("#room-status");
@@ -169,6 +204,7 @@ class TokenBridgeWebSocket extends EventTarget {
       const contract = await response.json();
       if (!contract.wsUrl) throw new Error("El backend no devolvió URL WebSocket tokenizada.");
 
+      persistJoinContract(join.roomID, contract);
       this.url = contract.wsUrl;
       const socket = new NativeWebSocket(contract.wsUrl, this.#protocols);
       this.#attachSocket(socket);
