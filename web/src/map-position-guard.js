@@ -103,8 +103,10 @@ function installWebSocketDiagnostics() {
     activeSocket = socket;
     window.__lastSeenSocket = socket;
 
+    socket.addEventListener("open", () => removeLocalMarker());
     socket.addEventListener("message", event => {
       const msg = safeJSON(event.data);
+      if (msg?.t === "snapshot") removeLocalMarker();
       if (msg?.t === "meet" && msg.d) renderSafetyMeetingPoint(msg.d);
       if (msg?.t === "perimeter" && msg.d) renderSafetyPerimeter(msg.d);
       if (msg?.t !== "error") return;
@@ -284,6 +286,11 @@ function renderLocalPosition(position) {
   if (!map || !window.L) return;
   stabilizeMapLayout(map);
 
+  if (isSocketOpen()) {
+    removeLocalMarker();
+    return;
+  }
+
   const latLng = [lat, lng];
   const icon = window.L.divIcon({
     className: "",
@@ -308,6 +315,17 @@ function renderLocalPosition(position) {
       map.invalidateSize();
     }, 120);
   }
+}
+
+function removeLocalMarker() {
+  if (!localMarker) return;
+  localMarker.remove();
+  localMarker = null;
+}
+
+function isSocketOpen() {
+  const socket = activeSocket || window.__lastSeenSocket;
+  return Boolean(socket && socket.readyState === window.WebSocket.OPEN);
 }
 
 function renderSafetyMeetingPoint(point) {
