@@ -16,6 +16,31 @@ func newTestRoom() *Room {
 	})
 }
 
+func TestCanJoinPreflightRejectsDuplicateNickname(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	err := room.CanJoin("client-2", "pedro")
+	if !errors.Is(err, ErrNicknameTaken) {
+		t.Fatalf("expected ErrNicknameTaken in preflight, got %v", err)
+	}
+}
+
+func TestCanJoinPreflightAllowsSameClientReconnect(t *testing.T) {
+	room := newTestRoom()
+
+	if err := room.AddClient(NewClient(ClientConfig{ID: "client-1", SessionID: "a", Nickname: "Pedro", PIN: "1111", Avatar: "🐼"})); err != nil {
+		t.Fatalf("first add failed: %v", err)
+	}
+
+	if err := room.CanJoin("client-1", "Otro mote"); err != nil {
+		t.Fatalf("same client should be allowed to preflight reconnect, got %v", err)
+	}
+}
+
 func TestAddClientReconnectsSameClientIDWithoutDuplicate(t *testing.T) {
 	room := newTestRoom()
 
