@@ -8,7 +8,7 @@ The goal is to keep product behaviour in the backend so that the current PWA and
 
 - Backend version: exposed by `GET /api/health` as `version`.
 - Protocol version: exposed as `protocolVersion`.
-- Current protocol: `lastseen-v1`.
+- Current protocol: `lastseen-v2`.
 
 ## Health
 
@@ -22,12 +22,13 @@ Response:
 {
   "status": "ok",
   "version": "2026-07-16-railway-cache-bust",
-  "protocolVersion": "lastseen-v1",
+  "protocolVersion": "lastseen-v2",
   "features": {
     "creatorToken": true,
     "participantSnapshot": true,
     "joinContract": true,
-    "nativeClients": true
+    "nativeClients": true,
+    "wsToken": true
   }
 }
 ```
@@ -108,17 +109,20 @@ Response:
     "nickname": "Virginia",
     "avatar": "🦊"
   },
-  "wsUrl": "wss://example.com/ws/rooms/abc123?nick=Virginia&pin=1234&avatar=%F0%9F%A6%8A&id=stable-client-id",
-  "protocolVersion": "lastseen-v1",
+  "wsUrl": "wss://example.com/ws/rooms/abc123?token=short-lived-token",
+  "wsToken": "short-lived-token",
+  "tokenExpiresIn": 119,
+  "protocolVersion": "lastseen-v2",
   "features": {
     "backgroundNativeTracking": true,
     "foregroundPWA": true,
-    "safetyEvents": true
+    "safetyEvents": true,
+    "wsToken": true
   }
 }
 ```
 
-The join endpoint is a preflight contract. It validates the current room and nickname rules, but the WebSocket join remains the final source of truth because another client could join between the preflight response and the socket connection.
+The join endpoint is a preflight contract. It validates the current room and nickname rules, then issues a short-lived single-use WebSocket token. The WebSocket join remains the final source of truth because another client could join between the preflight response and the socket connection.
 
 Common error responses:
 
@@ -131,7 +135,15 @@ Common error responses:
 
 ## WebSocket join
 
-Existing PWA-compatible connection:
+Recommended native-client connection:
+
+```http
+GET /ws/rooms/{roomID}?token={wsToken}
+```
+
+The token is short-lived, single-use, and scoped to the room. It carries the sanitized join identity prepared by `POST /api/rooms/{roomID}/join`.
+
+Existing PWA-compatible connection remains supported during migration:
 
 ```http
 GET /ws/rooms/{roomID}?nick={nickname}&pin={pin}&avatar={avatar}&id={clientId}
@@ -206,25 +218,23 @@ A native client should:
 
 1. Store a stable `clientId` per room/device.
 2. Call `POST /api/rooms/{roomID}/join`.
-3. Open the returned `wsUrl`.
+3. Open the returned `wsUrl` with the short-lived `token`.
 4. Start a foreground location service only after user consent.
 5. Keep a persistent notification while sharing location.
 6. Send `loc` messages from the service.
-7. Reconnect WebSocket when coverage returns.
+7. Reconnect WebSocket when coverage returns by requesting a fresh join token.
 8. Re-send the latest known location after reconnect.
 9. Stop tracking when the user leaves the room or the operation ends.
 
 ## Current security note
 
-`lastseen-v1` still keeps PIN in the WebSocket query string for compatibility with the current PWA.
+`lastseen-v2` supports token-based WebSocket joins for native clients and keeps the old query-parameter join path only for PWA compatibility during migration.
 
-A future `lastseen-v2` should replace this with:
+A production Android release should use only:
 
 ```http
 POST /api/rooms/{roomID}/join
-→ { "wsToken": "short-lived-token" }
+→ { "wsToken": "short-lived-token", "wsUrl": "wss://.../ws/rooms/{roomID}?token=..." }
 
 GET /ws/rooms/{roomID}?token={wsToken}
 ```
-
-That is the recommended next backend step before a production Android release.
