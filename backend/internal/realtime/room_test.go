@@ -181,6 +181,38 @@ func TestOldSessionDisconnectDoesNotMarkNewSessionOffline(t *testing.T) {
 	}
 }
 
+func TestSetPerimeterRecalculatesGeofenceAlerts(t *testing.T) {
+	room := newTestRoom()
+
+	inside := NewClient(ClientConfig{ID: "client-in", SessionID: "in", Nickname: "Dentro", PIN: "1111", Avatar: "🐼"})
+	inside.Lat = 37.25
+	inside.Lng = -6.95
+	outside := NewClient(ClientConfig{ID: "client-out", SessionID: "out", Nickname: "Fuera", PIN: "2222", Avatar: "🦊"})
+	outside.Lat = 37.28
+	outside.Lng = -6.95
+
+	if err := room.AddClient(inside); err != nil {
+		t.Fatalf("inside add failed: %v", err)
+	}
+	if err := room.AddClient(outside); err != nil {
+		t.Fatalf("outside add failed: %v", err)
+	}
+
+	room.SetPerimeter("client-in", InboundMessage{Lat: 37.25, Lng: -6.95, RadiusMeters: 250})
+
+	clients := map[string]PublicClient{}
+	for _, client := range room.Snapshot().Clients {
+		clients[client.ID] = client
+	}
+
+	if clients["client-in"].GeofenceAlert {
+		t.Fatalf("inside client should remain inside perimeter: %+v", clients["client-in"])
+	}
+	if !clients["client-out"].GeofenceAlert {
+		t.Fatalf("outside client should be marked outside perimeter: %+v", clients["client-out"])
+	}
+}
+
 func TestSnapshotOrderingIsDeterministic(t *testing.T) {
 	room := newTestRoom()
 
