@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v26";
+const CACHE_VERSION = "lastseen-v27";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -14,6 +14,7 @@ const STATIC_ASSETS = [
   "./src/dashboard.js",
   "./src/room-store.js",
   "./src/websocket-client.js",
+  "./src/websocket-token-bridge.js",
   "./src/map-zone-drawer.js",
   "./src/button-feedback.js",
   "./src/map-position-guard.js",
@@ -71,5 +72,4 @@ self.addEventListener("fetch", event => {
         });
     })
   );
-}
-);
+});
