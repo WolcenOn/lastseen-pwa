@@ -1,4 +1,4 @@
-const CACHE_VERSION = "lastseen-v29";
+const CACHE_VERSION = "lastseen-v30";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -17,6 +17,7 @@ const STATIC_ASSETS = [
   "./src/map-zone-drawer.js",
   "./src/button-feedback.js",
   "./src/websocket-token-bridge.js",
+  "./src/capabilities-ui.js",
   "./src/map-position-guard.js",
   "./src/room-enhancements.js"
 ];
