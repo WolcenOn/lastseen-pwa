@@ -158,6 +158,21 @@ func (r *Room) AddClient(client *Client) error {
 	return nil
 }
 
+func (r *Room) ClientRole(clientID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	client, ok := r.clients[clientID]
+	if !ok || client.Role == "" {
+		return ClientRoleParticipant
+	}
+	return client.Role
+}
+
+func (r *Room) CanManageSafety(clientID string) bool {
+	return r.ClientRole(clientID) == ClientRoleCreator
+}
+
 func (r *Room) nicknameTakenLocked(clientID string, nickname string) bool {
 	key := normalizeNickname(nickname)
 	if key == "" {
