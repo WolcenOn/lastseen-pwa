@@ -116,8 +116,10 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		"features": map[string]bool{
 			"creatorToken":        true,
 			"participantSnapshot": true,
+			"joinCapabilities":    true,
 			"joinContract":        true,
 			"nativeClients":       true,
+			"roles":               true,
 			"wsToken":             true,
 		},
 	})
