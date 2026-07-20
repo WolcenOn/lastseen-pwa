@@ -16,6 +16,7 @@ type ClientConfig struct {
 	Nickname  string
 	PIN       string
 	Avatar    string
+	Role      string
 	Conn      *websocket.Conn
 }
 
@@ -25,6 +26,7 @@ type Client struct {
 	Nickname  string
 	PIN       string
 	Avatar    string
+	Role      string
 
 	Conn *websocket.Conn
 	send chan OutboundMessage
@@ -41,12 +43,18 @@ type Client struct {
 }
 
 func NewClient(config ClientConfig) *Client {
+	role := config.Role
+	if role == "" {
+		role = ClientRoleParticipant
+	}
+
 	return &Client{
 		ID:        config.ID,
 		SessionID: config.SessionID,
 		Nickname:  config.Nickname,
 		PIN:       config.PIN,
 		Avatar:    config.Avatar,
+		Role:      role,
 		Conn:      config.Conn,
 		send:      make(chan OutboundMessage, sendBufferSize),
 		Connected: true,
