@@ -184,6 +184,7 @@ func (h *Hub) HandleClientMessage(roomID string, clientID string, msg InboundMes
 	case "perimeter":
 		perimeter := room.SetPerimeter(clientID, msg)
 		room.Broadcast(OutboundMessage{Type: "perimeter", Data: perimeter})
+		room.Broadcast(OutboundMessage{Type: "snapshot", Data: room.Snapshot()})
 	}
 }
 
