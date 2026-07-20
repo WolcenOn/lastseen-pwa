@@ -28,7 +28,37 @@ function parseLegacyJoinURL(rawURL) {
 
   if (!roomID || !nickname || !pin) return null;
 
-  return { roomID, nickname, pin, avatar, clientID };
+  return { roomID, nickname, pin, avatar, clientID, creatorToken: readCreatorToken(roomID) };
+}
+
+function readCreatorToken(roomID) {
+  if (!roomID) return "";
+
+  const stateKey = `lastseen:${roomID}:state`;
+  const tokenKey = `lastseen:${roomID}:creator-token`;
+
+  try {
+    const state = JSON.parse(globalThis.localStorage?.getItem(stateKey) || "{}");
+    if (typeof state?.creatorToken === "string" && state.creatorToken.trim()) return state.creatorToken.trim();
+  } catch {
+    // Ignore malformed local room state and try backup keys below.
+  }
+
+  try {
+    const localToken = globalThis.localStorage?.getItem(tokenKey) || "";
+    if (localToken.trim()) return localToken.trim();
+  } catch {
+    // Ignore storage access errors.
+  }
+
+  try {
+    const sessionToken = globalThis.sessionStorage?.getItem(tokenKey) || "";
+    if (sessionToken.trim()) return sessionToken.trim();
+  } catch {
+    // Ignore storage access errors.
+  }
+
+  return "";
 }
 
 function bridgeStatus(message) {
@@ -126,7 +156,8 @@ class TokenBridgeWebSocket extends EventTarget {
           nickname: join.nickname,
           pin: join.pin,
           avatar: join.avatar,
-          clientId: join.clientID
+          clientId: join.clientID,
+          creatorToken: join.creatorToken || ""
         })
       });
 
