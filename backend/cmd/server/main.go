@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -30,7 +31,8 @@ const (
 	shutdownTimeout   = 10 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	backendVersion    = "2026-07-16-railway-cache-bust"
-	protocolVersion   = "lastseen-v1"
+	protocolVersion   = "lastseen-v2"
+	joinTokenTTL      = 2 * time.Minute
 )
 
 var (
@@ -66,6 +68,8 @@ type joinRoomResponse struct {
 	Room            realtime.PublicRoom `json:"room"`
 	Client          joinClientResponse   `json:"client"`
 	WebSocketURL     string               `json:"wsUrl"`
+	WebSocketToken   string               `json:"wsToken"`
+	TokenExpiresIn   int64                `json:"tokenExpiresIn"`
 	ProtocolVersion string               `json:"protocolVersion"`
 	Features        map[string]bool      `json:"features"`
 }
@@ -81,9 +85,77 @@ type updateRoomRequest struct {
 	TTLMinutes   int    `json:"ttlMinutes"`
 }
 
+type websocketJoinClaims struct {
+	RoomID    string
+	ClientID  string
+	Nickname  string
+	PIN       string
+	Avatar    string
+	ExpiresAt time.Time
+}
+
+type websocketTokenStore struct {
+	mu     sync.Mutex
+	ttl    time.Duration
+	tokens map[string]websocketJoinClaims
+}
+
+func newWebSocketTokenStore(ttl time.Duration) *websocketTokenStore {
+	if ttl <= 0 {
+		ttl = joinTokenTTL
+	}
+	return &websocketTokenStore{ttl: ttl, tokens: make(map[string]websocketJoinClaims)}
+}
+
+func (s *websocketTokenStore) Issue(claims websocketJoinClaims) (string, websocketJoinClaims, error) {
+	token, err := randomURLSafe(24)
+	if err != nil {
+		return "", websocketJoinClaims{}, err
+	}
+
+	claims.ExpiresAt = time.Now().UTC().Add(s.ttl)
+
+	s.mu.Lock()
+	s.cleanupLocked(time.Now().UTC())
+	s.tokens[token] = claims
+	s.mu.Unlock()
+
+	return token, claims, nil
+}
+
+func (s *websocketTokenStore) Consume(token string, roomID string) (websocketJoinClaims, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return websocketJoinClaims{}, false
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cleanupLocked(now)
+	claims, ok := s.tokens[token]
+	if !ok || claims.RoomID != roomID || !claims.ExpiresAt.After(now) {
+		delete(s.tokens, token)
+		return websocketJoinClaims{}, false
+	}
+
+	delete(s.tokens, token)
+	return claims, true
+}
+
+func (s *websocketTokenStore) cleanupLocked(now time.Time) {
+	for token, claims := range s.tokens {
+		if !claims.ExpiresAt.After(now) {
+			delete(s.tokens, token)
+		}
+	}
+}
+
 func main() {
 	addr := resolveAddr()
 	staticDir := env("STATIC_DIR", defaultStaticDir)
+	joinTokens := newWebSocketTokenStore(joinTokenTTL)
 
 	hub := realtime.NewHub(realtime.HubConfig{
 		RoomTTL:          defaultRoomTTL,
@@ -102,10 +174,10 @@ func main() {
 	mux.HandleFunc("GET /api/health", healthHandler)
 	mux.HandleFunc("POST /api/rooms", createRoomHandler(hub))
 	mux.HandleFunc("GET /api/rooms/{roomID}", roomInfoHandler(hub))
-	mux.HandleFunc("POST /api/rooms/{roomID}/join", joinRoomHandler(hub))
+	mux.HandleFunc("POST /api/rooms/{roomID}/join", joinRoomHandler(hub, joinTokens))
 	mux.HandleFunc("PATCH /api/rooms/{roomID}", updateRoomHandler(hub))
 	mux.HandleFunc("DELETE /api/rooms/{roomID}", deleteRoomHandler(hub))
-	mux.HandleFunc("GET /ws/rooms/{roomID}", websocketHandler(hub))
+	mux.HandleFunc("GET /ws/rooms/{roomID}", websocketHandler(hub, joinTokens))
 
 	staticPath, err := filepath.Abs(staticDir)
 	if err != nil {
@@ -149,6 +221,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 			"participantSnapshot": true,
 			"joinContract":        true,
 			"nativeClients":       true,
+			"wsToken":             true,
 		},
 	})
 }
@@ -207,7 +280,7 @@ func roomInfoHandler(hub *realtime.Hub) http.HandlerFunc {
 	}
 }
 
-func joinRoomHandler(hub *realtime.Hub) http.HandlerFunc {
+func joinRoomHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		roomID := r.PathValue("roomID")
 		if roomID == "" {
@@ -251,6 +324,13 @@ func joinRoomHandler(hub *realtime.Hub) http.HandlerFunc {
 			return
 		}
 
+		claims := websocketJoinClaims{RoomID: roomID, ClientID: clientID, Nickname: nickname, PIN: pin, Avatar: avatar}
+		wsToken, claims, err := tokens.Issue(claims)
+		if err != nil {
+			http.Error(w, "failed to issue websocket token", http.StatusInternalServerError)
+			return
+		}
+
 		writeJSON(w, http.StatusOK, joinRoomResponse{
 			Room: room,
 			Client: joinClientResponse{
@@ -258,12 +338,15 @@ func joinRoomHandler(hub *realtime.Hub) http.HandlerFunc {
 				Nickname: nickname,
 				Avatar:   avatar,
 			},
-			WebSocketURL:     websocketJoinURL(r, roomID, nickname, pin, avatar, clientID),
+			WebSocketURL:     websocketTokenURL(r, roomID, wsToken),
+			WebSocketToken:   wsToken,
+			TokenExpiresIn:   int64(time.Until(claims.ExpiresAt).Seconds()),
 			ProtocolVersion: protocolVersion,
 			Features: map[string]bool{
 				"backgroundNativeTracking": true,
 				"foregroundPWA":            true,
 				"safetyEvents":             true,
+				"wsToken":                  true,
 			},
 		})
 	}
@@ -298,36 +381,18 @@ func deleteRoomHandler(hub *realtime.Hub) http.HandlerFunc {
 	}
 }
 
-func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
+func websocketHandler(hub *realtime.Hub, tokens *websocketTokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		roomID := r.PathValue("roomID")
-		nickname := sanitizeNickname(r.URL.Query().Get("nick"))
-		pin := strings.TrimSpace(r.URL.Query().Get("pin"))
-		avatar := sanitizeAvatar(r.URL.Query().Get("avatar"))
-		clientID := sanitizeClientID(r.URL.Query().Get("id"))
-
 		if roomID == "" {
 			http.Error(w, "missing room id", http.StatusBadRequest)
 			return
 		}
-		if nickname == "" {
-			http.Error(w, "missing nickname", http.StatusBadRequest)
+
+		nickname, pin, avatar, clientID, ok := websocketJoinIdentity(r, tokens, roomID)
+		if !ok {
+			http.Error(w, "invalid websocket token or join parameters", http.StatusUnauthorized)
 			return
-		}
-		if !pinPattern.MatchString(pin) {
-			http.Error(w, "invalid pin", http.StatusBadRequest)
-			return
-		}
-		if avatar == "" {
-			avatar = avatarSet[0]
-		}
-		if clientID == "" {
-			var err error
-			clientID, err = randomURLSafe(9)
-			if err != nil {
-				http.Error(w, "failed to create client", http.StatusInternalServerError)
-				return
-			}
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -359,6 +424,37 @@ func websocketHandler(hub *realtime.Hub) http.HandlerFunc {
 		go client.WritePump(hub)
 		go client.ReadPump(hub, roomID)
 	}
+}
+
+func websocketJoinIdentity(r *http.Request, tokens *websocketTokenStore, roomID string) (string, string, string, string, bool) {
+	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
+		claims, ok := tokens.Consume(token, roomID)
+		if !ok {
+			return "", "", "", "", false
+		}
+		return claims.Nickname, claims.PIN, claims.Avatar, claims.ClientID, true
+	}
+
+	nickname := sanitizeNickname(r.URL.Query().Get("nick"))
+	pin := strings.TrimSpace(r.URL.Query().Get("pin"))
+	avatar := sanitizeAvatar(r.URL.Query().Get("avatar"))
+	clientID := sanitizeClientID(r.URL.Query().Get("id"))
+
+	if nickname == "" || !pinPattern.MatchString(pin) {
+		return "", "", "", "", false
+	}
+	if avatar == "" {
+		avatar = avatarSet[0]
+	}
+	if clientID == "" {
+		var err error
+		clientID, err = randomURLSafe(9)
+		if err != nil {
+			return "", "", "", "", false
+		}
+	}
+
+	return nickname, pin, avatar, clientID, true
 }
 
 func joinErrorMessage(err error) realtime.OutboundMessage {
@@ -401,7 +497,22 @@ func writeRoomAdminResult(w http.ResponseWriter, public realtime.PublicRoom, err
 	}
 }
 
+func websocketTokenURL(r *http.Request, roomID string, token string) string {
+	values := url.Values{}
+	values.Set("token", token)
+	return websocketURL(r, roomID, values)
+}
+
 func websocketJoinURL(r *http.Request, roomID string, nickname string, pin string, avatar string, clientID string) string {
+	values := url.Values{}
+	values.Set("nick", nickname)
+	values.Set("pin", pin)
+	values.Set("avatar", avatar)
+	values.Set("id", clientID)
+	return websocketURL(r, roomID, values)
+}
+
+func websocketURL(r *http.Request, roomID string, values url.Values) string {
 	scheme := "ws"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "wss"
@@ -411,12 +522,6 @@ func websocketJoinURL(r *http.Request, roomID string, nickname string, pin strin
 	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
 		host = forwardedHost
 	}
-
-	values := url.Values{}
-	values.Set("nick", nickname)
-	values.Set("pin", pin)
-	values.Set("avatar", avatar)
-	values.Set("id", clientID)
 
 	return (&url.URL{
 		Scheme:   scheme,
