@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	ClientRoleCreator     = "creator"
+	ClientRoleParticipant = "participant"
+)
+
 var (
 	ErrRoomNotFound  = errors.New("room not found")
 	ErrRoomFull      = errors.New("room is full for free tier")
@@ -104,6 +109,17 @@ func (h *Hub) PrepareJoin(roomID string, clientID string, nickname string) (Publ
 	}
 
 	return room.Public(time.Now().UTC()), nil
+}
+
+func (h *Hub) ClientRole(roomID string, creatorToken string) (string, error) {
+	room, ok := h.GetRoom(roomID)
+	if !ok {
+		return "", ErrRoomNotFound
+	}
+	if creatorToken != "" && room.CreatorToken != "" && creatorToken == room.CreatorToken {
+		return ClientRoleCreator, nil
+	}
+	return ClientRoleParticipant, nil
 }
 
 func (h *Hub) JoinRoom(roomID string, client *Client) error {
